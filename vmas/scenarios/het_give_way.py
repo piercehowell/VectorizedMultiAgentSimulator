@@ -19,6 +19,7 @@ class Scenario(BaseScenario):
         self.linear_friction = kwargs.get("linear_friction", 0.1)
         self.mirror_passage = kwargs.get("mirror_passage", False)
         self.done_on_completion = kwargs.get("done_on_completion", False)
+        self.kwargs = kwargs
 
 
         # Reward params
@@ -141,22 +142,33 @@ class Scenario(BaseScenario):
 
         self.pos_rew = torch.zeros(batch_dim, device=device)
         self.final_rew = self.pos_rew.clone()
-        
+
+        self.reset_step=0
         return(world)
 
-    def _reset_capability_at(self, env_index: int = None):
+    def _reset_capability_at(self, env_index: int = None, **kwargs):
         """
         Resets the blue and green agents capability
         When a None index is passed to env_index, the world should make a vectorized (batch) reset of capabilities
+        When a capability_curriculum function is provided, capabilities are generated from this
+        function.
         """
         # TODO: Enable loading from specific teams
 
         # capabilities [max velocity, agent radius]
         # blue agent
-        blue_agent_max_v = np.random.uniform(0.10, 0.50)
-        blue_agent_radius = np.random.uniform(0.10, 0.25)
-        green_agent_max_v = np.random.uniform(0.10, 0.50)
-        green_agent_radius = np.random.uniform(0.10, 0.25)
+
+        capability_curriculum = kwargs.get('capability_curriculum', None)
+        if(capability_curriculum and callable(capability_curriculum)):
+            capabilities = capability_curriculum(self.reset_step, **kwargs)
+            print(f"Resampling curriculum: {capabilities}")
+            blue_agent_max_v, blue_agent_radius, green_agent_max_v, green_agent_radius = capabilities
+        
+        else:
+            blue_agent_max_v = np.random.uniform(0.10, 0.50)
+            blue_agent_radius = np.random.uniform(0.10, 0.25)
+            green_agent_max_v = np.random.uniform(0.10, 0.50)
+            green_agent_radius = np.random.uniform(0.10, 0.25)
         self.world.agents[0].set_capability(
             torch.tensor(
                 [blue_agent_max_v, blue_agent_radius],
@@ -278,7 +290,8 @@ class Scenario(BaseScenario):
         )
 
         # reset the capabilities of agents
-        self._reset_capability_at(env_index)
+        # TODO: Probably should do something better than kwargs, but fine for now
+        self._reset_capability_at(env_index, **self.kwargs)
 
         self.reset_map(env_index)
 
@@ -306,6 +319,8 @@ class Scenario(BaseScenario):
             )
         else:
             self.goal_reached[env_index] = False
+        
+        self.reset_step+=1
 
     def process_action(self, agent: Agent):
         # expects control to be between 0 and 1
