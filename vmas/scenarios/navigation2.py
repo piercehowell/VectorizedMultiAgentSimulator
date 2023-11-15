@@ -18,7 +18,7 @@ from vmas.simulator.core import Agent, Box, Landmark, World, Sphere, Entity
 from vmas.simulator.scenario import BaseScenario
 from vmas.simulator.sensors import Lidar
 from vmas.simulator.utils import Color, ScenarioUtils
-from vmas.simulator.controllers.velocity_controller import VelocityController
+from vmas.simulator.dynamics.diff_drive import DiffDriveDynamics
 
 
 if typing.TYPE_CHECKING:
@@ -29,7 +29,6 @@ class Scenario(BaseScenario):
     def make_world(self, batch_dim: int, device: torch.device, **kwargs):
         self.plot_grid = False
         self.n_agents = kwargs.get("n_agents", 4)
-        self.collisions = kwargs.get("collisions", True)
 
         self.observe_all_goals = kwargs.get("observe_all_goals", False)
 
@@ -49,10 +48,8 @@ class Scenario(BaseScenario):
         
         self.min_collision_distance = 0.005
 
-        controller_params = [2, 6, 0.002]
-
          # Make world
-        world = World(batch_dim, device, substeps=2)
+        world = World(batch_dim, device, substeps=1, dt=.1)
 
         known_colors = [
             (0.22, 0.49, 0.72),
@@ -79,10 +76,12 @@ class Scenario(BaseScenario):
             # Constraint: all agents have same action range and multiplier
             agent = Agent(
                 name=f"agent {i}",
-                collide=self.collisions,
+                collide=True,
                 color=color,
                 shape=Sphere(radius=self.agent_radius),
                 render_action=True,
+                u_range=1,
+                u_rot_range=torch.pi/3,
                 sensors=[
                     Lidar(
                         world,
@@ -91,12 +90,8 @@ class Scenario(BaseScenario):
                         entity_filter=entity_filter_agents,
                     ),
                 ]
-                if self.collisions
-                else None,
             )
-            agent.controller = VelocityController(
-                agent, world, controller_params, "standard"
-            )
+            agent.dynamics = DiffDriveDynamics(agent, world, integration="euler")
             agent.pos_rew = torch.zeros(batch_dim, device=device)
             agent.agent_collision_rew = agent.pos_rew.clone()
             world.add_agent(agent)
@@ -236,13 +231,12 @@ class Scenario(BaseScenario):
             [
                 agent.episode_name,
                 agent.state.pos,
+                agent.state.rot,
                 agent.state.vel,
             ]
             + goal_poses
             + (
                 [agent.sensors[0]._max_range - agent.sensors[0].measure()]
-                if self.collisions
-                else []
             ),
             dim=-1,
         )
@@ -293,6 +287,12 @@ class Scenario(BaseScenario):
                     geoms.append(line)
 
         return geoms
+    
+    def process_action(self, agent: Agent):
+        try:
+            agent.dynamics.process_force()
+        except AttributeError:
+            pass
 
 
 if __name__ == "__main__":

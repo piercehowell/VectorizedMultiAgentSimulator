@@ -14,7 +14,7 @@ from PIL import Image
 from vmas import make_env
 import numpy as np
 
-stepsPerTimeInterval = 30 #This still assumes constant velocity... Needs to be large enough so agents actually reach their goal before moving on
+stepsPerTimeInterval = 20 #This still assumes constant velocity... Needs to be large enough so agents actually reach their goal before moving on
 
 def load_map(map_file, device):
     #Load in map
@@ -73,44 +73,35 @@ def load_episodes(log_dir, device, width, height):
         episodes[episode_name] = agent_paths.copy()
     return episodes
 
-def select_action(position, waypoint):   
-    #Proof of concept action selector based on agent's position and desired waypoint
-    #This can be modified however needed to select better actions
+def select_action(position, waypoint, steps):   
+    # Constants
+    total_time = .1 * (stepsPerTimeInterval - steps%stepsPerTimeInterval)
+    max_linear_velocity = 2.0  # Maximum linear velocity
+    max_angular_velocity = torch.pi/3  # Maximum angular velocity
 
-    ''' 
-    #For discrete actions
-    x_mag = waypoint[0] - position[0]
-    y_mag = waypoint[1] - position[1]
-    if abs(x_mag) > abs(y_mag):
-        if x_mag < 0:
-            return [1]
-        else:
-            return [2]
-    else:
-        if y_mag < 0:
-            return [3]
-        else:
-            return [4]
-    '''
+    # Unpack robot position
+    x, y, theta = position
 
-    #For continuous actions
-    action = []
-    if (waypoint[0] - position[0]) > .1:
-        action.append(1)
-    elif (waypoint[0] - position[0]) < -.1:
-        action.append(-1)
-    else:
-        action.append(5 * (waypoint[0] - position[0]))
+    # Unpack desired position
+    x_d, y_d = waypoint
 
+    # Calculate the difference in position and angle
+    delta_x = x_d - x
+    delta_y = y_d - y
+    delta_theta = np.arctan2(delta_y, delta_x) - theta
 
-    if (waypoint[1] - position[1]) > .1:
-        action.append(1)
-    elif (waypoint[1] - position[1]) < -.1:
-        action.append(-1)
-    else:
-        action.append(5 * (waypoint[1] - position[1]))
+    # Ensure angle difference is within -pi to pi range
+    delta_theta = np.arctan2(np.sin(delta_theta), np.cos(delta_theta))
 
-    return action
+    # Calculate required linear and angular velocities
+    v = np.sqrt(delta_x**2 + delta_y**2) / total_time
+    w = delta_theta / total_time
+
+    # Cap linear and angular velocities to maximum values
+    v = min(v, max_linear_velocity)
+    w = min(w, max_angular_velocity)
+    w = max(w, -max_angular_velocity)
+    return [v, 0, w] #The second parameter is ignored
 
 def get_agent_action(episodes, obs, steps):
     scenario_time = steps / stepsPerTimeInterval
@@ -119,15 +110,15 @@ def get_agent_action(episodes, obs, steps):
         env_actions = []
         for env_ob in ob:
             episode = episodes[int(env_ob[0])]
-            x, y = env_ob[1:3]
+            x, y, theta = env_ob[1:4]
             appended = False
             for waypoint in episode[i]:
                 if waypoint[0] > scenario_time:
-                    env_actions.append(select_action([x,y],waypoint[1:]))
+                    env_actions.append(select_action([x,y,theta],waypoint[1:], steps))
                     appended = True
                     break
             if not appended:
-                env_actions.append(select_action([x,y],episode[i][-1][1:]))
+                env_actions.append(select_action([x,y,theta],episode[i][-1][1:], steps))
         actions.append(env_actions)
         
     return actions
@@ -154,19 +145,17 @@ def main(args):
     n_agents = len(episodes[next(iter(episodes))].keys()) #Assumes all episodes has same number of agents
 
     num_envs = args.num_envs  # Number of vectorized environments
-    continuous_actions = True
     n_steps = args.max_steps # Number of steps before returning done
     dict_spaces = True  # Weather to return obs, rewards, and infos as dictionaries with agent names (by default they are lists of len # of agents)
 
     start_action = (
-        [0, 0] if continuous_actions else [0]
+        [0, 0, 0]
     )  # Simple action to start the program 
 
     env = make_env(
         scenario=scenario_name,
         num_envs=num_envs,
         device=device,
-        continuous_actions=continuous_actions,
         dict_spaces=dict_spaces,
         wrapper=None,
         seed=None,
