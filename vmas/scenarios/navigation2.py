@@ -44,7 +44,6 @@ class Scenario(BaseScenario):
 
         self.episodes = kwargs.get('episodes')
         self.map = kwargs.get('map')
-        self.first = True
         
         self.min_collision_distance = 0.005
 
@@ -123,20 +122,17 @@ class Scenario(BaseScenario):
     def reset_world_at(self, env_index: int = None):
         episode_name, episode_agents = random.choice(list(self.episodes.items()))
 
-        if self.first:
-            #TODO: is there a way to do this in the constructor since it only needs to happen once?
-            counter = 0
-            indices = torch.nonzero(self.map == 1)
-            for i,coord in enumerate(indices):
-                self.world.landmarks[i+self.n_agents].set_pos(
-                    torch.tensor(
-                        [coord[1], coord[0]],
-                        dtype=torch.float32,
-                        device=self.world.device
-                    ),
-                    batch_index = None
-                )
-            self.first=False
+        #NOTE: this needs to happen every reset to be compatible with BaseScenario reset
+        indices = torch.nonzero(self.map == 1)
+        for i,coord in enumerate(indices):
+            self.world.landmarks[i+self.n_agents].set_pos(
+                torch.tensor(
+                    [coord[1], coord[0]],
+                    dtype=torch.float32,
+                    device=self.world.device
+                ),
+                batch_index = env_index
+            )
 
         for i, agent in enumerate(self.world.agents):
             agent.set_pos(
