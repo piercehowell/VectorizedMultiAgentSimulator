@@ -62,7 +62,7 @@ class Scenario(BaseScenario):
         colors = torch.randn(
             (max(self.n_agents - len(known_colors), 0), 3), device=device
         )
-        entity_filter_agents: Callable[[Entity], bool] = lambda e: isinstance(e, Agent)
+        entity_filter_agents: Callable[[Entity], bool] = lambda e: isinstance(e, Agent) or (isinstance(e, Landmark) and e.collide)
 
         # Add agents
         for i in range(self.n_agents):
