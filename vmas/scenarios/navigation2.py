@@ -110,7 +110,8 @@ class Scenario(BaseScenario):
             obstacle = Landmark(
                 name = f"Obstacle at {coord}",
                 collide = True,
-                shape = Box(1,1)
+                shape = Box(1,1),
+                collision_filter = lambda e: isinstance(e, Agent)
             )
             world.add_landmark(obstacle)            
 
@@ -188,6 +189,7 @@ class Scenario(BaseScenario):
 
             self.final_rew[self.all_goal_reached] = self.final_reward
 
+            # check for agent-agent collisions
             for i, a in enumerate(self.world.agents):
                 for j, b in enumerate(self.world.agents):
                     if i <= j:
@@ -198,6 +200,15 @@ class Scenario(BaseScenario):
                             distance <= self.min_collision_distance
                         ] += self.agent_collision_penalty
                         b.agent_collision_rew[
+                            distance <= self.min_collision_distance
+                        ] += self.agent_collision_penalty
+
+            # check for agent-obstacle collisions
+            for i, a in enumerate(self.world.agents):
+                for j, b in enumerate(self.world.landmarks[self.n_agents:]):
+                    if self.world.collides(a, b):
+                        distance = self.world.get_distance(a, b)
+                        a.agent_collision_rew[
                             distance <= self.min_collision_distance
                         ] += self.agent_collision_penalty
 
