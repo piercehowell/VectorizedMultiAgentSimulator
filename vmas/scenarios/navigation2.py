@@ -42,7 +42,8 @@ class Scenario(BaseScenario):
 
         self.agent_collision_penalty = kwargs.get("agent_collision_penalty", -1)
 
-        self.episodes = kwargs.get('episodes')
+        self.episodes = list(kwargs.get('episodes').items())
+        self.episode_iter = 0
         self.map = kwargs.get('map')
         
         self.min_collision_distance = 0.005
@@ -121,9 +122,9 @@ class Scenario(BaseScenario):
         return world
 
     def reset_world_at(self, env_index: int = None):
-        episode_name, episode_agents = random.choice(list(self.episodes.items()))
+        episode_name, episode_agents = self.episodes[self.episode_iter]
+        self.episode_iter += 1
 
-        #NOTE: this needs to happen every reset to be compatible with BaseScenario reset
         indices = torch.nonzero(self.map == 1)
         for i,coord in enumerate(indices):
             self.world.landmarks[i+self.n_agents].set_pos(

@@ -13,6 +13,9 @@ import xml.etree.ElementTree as ET
 from PIL import Image
 from vmas import make_env
 import numpy as np
+import torch
+from tensordict import TensorDict
+import pickle
 
 stepsPerTimeInterval = 20 #This still assumes constant velocity... Needs to be large enough so agents actually reach their goal before moving on
 
@@ -165,53 +168,66 @@ def main(args):
         map=grid_map,
         agent_radius = agent_size/2
     )
-
+    
     frame_list = []  # For creating a gif
-    init_time = time.time()
-    step = 0
     actions = {} 
     obs = []
-    for s in range(n_steps):
-        step += 1
-        print(f"Step {step}")
+    episodes_list = []
+    for e in range(len(episodes)):
+        print('Episode:',e)
+        step = 0
+        step_list = []
+        for s in range(n_steps):
+            step += 1
+            
+            if len(obs) == 0:
+                agent_actions = [[start_action] * num_envs]* len(env.agents)
+            else:
+                agent_actions = get_agent_action(episodes, obs, step)
+
+            for i, agent in enumerate(env.agents):
+                action = torch.tensor(
+                    agent_actions[i],
+                    device=device,
+                )
+                actions.update({agent.name: action})
+
+            obs, rews, dones, info = env.step(actions)
+    
+            if args.save_gif and e == 0:
+                frame_list.append(
+                    Image.fromarray(env.render(mode="rgb_array", agent_index_focus=None))
+                )
+
+            step_data = TensorDict({
+                'actions': actions.copy(),
+                'observations': obs.copy(),
+                'rewards': rews.copy(),
+                'dones': dones.clone(),
+            }, batch_size=[])
+            step_list.append(step_data)
+
+            if dones.all():
+                break
         
-        if len(obs) == 0:
-            agent_actions = [[start_action] * num_envs]* len(env.agents)
-        else:
-            agent_actions = get_agent_action(episodes, obs, step)
-
-        for i, agent in enumerate(env.agents):
-            action = torch.tensor(
-                agent_actions[i],
-                device=device,
+        if args.save_gif and e == 0:
+            gif_name = scenario_name + ".gif"
+            # Produce a gif
+            frame_list[0].save(
+                gif_name,
+                save_all=True,
+                append_images=frame_list[1:],
+                duration=3,
+                loop=0,
             )
-            actions.update({agent.name: action})
 
-        obs, rews, dones, info = env.step(actions)
-
-        frame_list.append(
-            Image.fromarray(env.render(mode="rgb_array", agent_index_focus=None))
-        )
-
-        if dones.all():
-            break
-
-    total_time = time.time() - init_time
-    print(
-        f"It took: {total_time}s for {n_steps} steps of {num_envs} parallel environments on device {device} "
-        f"for {scenario_name} scenario."
-    )
-
-    gif_name = scenario_name + ".gif"
-    # Produce a gif
-    frame_list[0].save(
-        gif_name,
-        save_all=True,
-        append_images=frame_list[1:],
-        duration=3,
-        loop=0,
-    )
-
+        episodes_list.append(step_list)
+        if e < len(episodes)-1:
+            env.reset()
+    
+    file_path = f"{args.log_dir}/trajectories.pkl"
+    with open(file_path, 'wb') as file:
+        pickle.dump(episodes_list, file)
 
 def create_parser():
     parser = argparse.ArgumentParser(description='Use the expert to solve the navigation2 scenario')
@@ -219,7 +235,8 @@ def create_parser():
     parser.add_argument('--config', '-c', default='config.xml', help='The config file for the task')
     parser.add_argument('--log_dir', '-l', default='logs', help='local path to logs directory')
     parser.add_argument('--device', '-d', default = 'cpu', help='device to run on')
-    parser.add_argument('--num_envs', type=int, default = 10, help='number of environments to run at once')
+    parser.add_argument('--num_envs', type=int, default = 1, help='number of environments to run at once')
+    parser.add_argument('--save_gif', action="store_true", help='whether or not to save the first episode as a gif')
     parser.add_argument('--max_steps', type=int, default = 500, help='Max number of steps to run for')
     return parser
 
