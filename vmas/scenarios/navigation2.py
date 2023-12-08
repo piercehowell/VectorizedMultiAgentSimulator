@@ -44,7 +44,6 @@ class Scenario(BaseScenario):
 
         self.episodes = kwargs.get('episodes')
         self.map = kwargs.get('map')
-        self.first = True
         
         self.min_collision_distance = 0.005
 
@@ -63,7 +62,7 @@ class Scenario(BaseScenario):
         colors = torch.randn(
             (max(self.n_agents - len(known_colors), 0), 3), device=device
         )
-        entity_filter_agents: Callable[[Entity], bool] = lambda e: isinstance(e, Agent)
+        entity_filter_agents: Callable[[Entity], bool] = lambda e: isinstance(e, Agent) or (isinstance(e, Landmark) and e.collide)
 
         # Add agents
         for i in range(self.n_agents):
@@ -111,7 +110,8 @@ class Scenario(BaseScenario):
             obstacle = Landmark(
                 name = f"Obstacle at {coord}",
                 collide = True,
-                shape = Box(1,1)
+                shape = Box(1,1),
+                collision_filter = lambda e: isinstance(e, Agent)
             )
             world.add_landmark(obstacle)            
 
@@ -123,20 +123,17 @@ class Scenario(BaseScenario):
     def reset_world_at(self, env_index: int = None):
         episode_name, episode_agents = random.choice(list(self.episodes.items()))
 
-        if self.first:
-            #TODO: is there a way to do this in the constructor since it only needs to happen once?
-            counter = 0
-            indices = torch.nonzero(self.map == 1)
-            for i,coord in enumerate(indices):
-                self.world.landmarks[i+self.n_agents].set_pos(
-                    torch.tensor(
-                        [coord[1], coord[0]],
-                        dtype=torch.float32,
-                        device=self.world.device
-                    ),
-                    batch_index = None
-                )
-            self.first=False
+        #NOTE: this needs to happen every reset to be compatible with BaseScenario reset
+        indices = torch.nonzero(self.map == 1)
+        for i,coord in enumerate(indices):
+            self.world.landmarks[i+self.n_agents].set_pos(
+                torch.tensor(
+                    [coord[1], coord[0]],
+                    dtype=torch.float32,
+                    device=self.world.device
+                ),
+                batch_index = env_index
+            )
 
         for i, agent in enumerate(self.world.agents):
             agent.set_pos(
@@ -192,6 +189,7 @@ class Scenario(BaseScenario):
 
             self.final_rew[self.all_goal_reached] = self.final_reward
 
+            # check for agent-agent collisions
             for i, a in enumerate(self.world.agents):
                 for j, b in enumerate(self.world.agents):
                     if i <= j:
@@ -202,6 +200,15 @@ class Scenario(BaseScenario):
                             distance <= self.min_collision_distance
                         ] += self.agent_collision_penalty
                         b.agent_collision_rew[
+                            distance <= self.min_collision_distance
+                        ] += self.agent_collision_penalty
+
+            # check for agent-obstacle collisions
+            for i, a in enumerate(self.world.agents):
+                for j, b in enumerate(self.world.landmarks[self.n_agents:]):
+                    if self.world.collides(a, b):
+                        distance = self.world.get_distance(a, b)
+                        a.agent_collision_rew[
                             distance <= self.min_collision_distance
                         ] += self.agent_collision_penalty
 
