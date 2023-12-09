@@ -224,7 +224,6 @@ def main(args):
         episodes_list.append(step_list)
         if e < len(episodes)-1:
             env.reset()
-    
     file_path = f"{args.log_dir}/trajectories.pkl"
     with open(file_path, 'wb') as file:
         pickle.dump(episodes_list, file)
