@@ -109,7 +109,7 @@ def select_action(position, waypoint, steps):
 def get_agent_action(episodes, obs, steps):
     scenario_time = steps / stepsPerTimeInterval
     actions = []
-    for i, ob in enumerate(obs.values()):
+    for i, ob in enumerate(obs):
         env_actions = []
         for env_ob in ob:
             episode = episodes[int(env_ob[0])]
@@ -149,7 +149,6 @@ def main(args):
 
     num_envs = args.num_envs  # Number of vectorized environments
     n_steps = args.max_steps # Number of steps before returning done
-    dict_spaces = True  # Weather to return obs, rewards, and infos as dictionaries with agent names (by default they are lists of len # of agents)
 
     start_action = (
         [0, 0, 0]
@@ -159,7 +158,7 @@ def main(args):
         scenario=scenario_name,
         num_envs=num_envs,
         device=device,
-        dict_spaces=dict_spaces,
+        dict_spaces=False,
         wrapper=None,
         seed=None,
         # Environment specific variables
@@ -185,14 +184,14 @@ def main(args):
             else:
                 agent_actions = get_agent_action(episodes, obs, step)
 
-            for i, agent in enumerate(env.agents):
-                action = torch.tensor(
-                    agent_actions[i],
-                    device=device,
-                )
-                actions.update({agent.name: action})
+            # for i, agent in enumerate(env.agents):
+            #     action = torch.tensor(
+            #         agent_actions[i],
+            #         device=device,
+            #     )
+            #     actions.update({agent.name: action})
 
-            obs, rews, dones, info = env.step(actions)
+            obs, rews, dones, info = env.step(agent_actions)
     
             if args.save_gif and e == 0:
                 frame_list.append(
@@ -200,8 +199,8 @@ def main(args):
                 )
 
             step_data = TensorDict({
-                'actions': actions.copy(),
-                'observations': obs.copy(),
+                'actions': agent_actions.copy(),
+                'observations': [o[:, 1:] for o in obs],
                 'rewards': rews.copy(),
                 'dones': dones.clone(),
             }, batch_size=[])
@@ -224,6 +223,7 @@ def main(args):
         episodes_list.append(step_list)
         if e < len(episodes)-1:
             env.reset()
+
     file_path = f"{args.log_dir}/trajectories.pkl"
     with open(file_path, 'wb') as file:
         pickle.dump(episodes_list, file)

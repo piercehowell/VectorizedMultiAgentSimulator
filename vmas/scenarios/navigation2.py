@@ -30,8 +30,6 @@ class Scenario(BaseScenario):
         self.plot_grid = False
         self.n_agents = kwargs.get("n_agents", 4)
 
-        self.observe_all_goals = kwargs.get("observe_all_goals", False)
-
         self.agent_radius = kwargs.get("agent_radius", 0.1)
         self.lidar_range = kwargs.get("lidar_range", self.agent_radius*2)
         self.comms_range = kwargs.get("comms_range", 0)
@@ -229,12 +227,11 @@ class Scenario(BaseScenario):
         return agent.pos_rew
 
     def observation(self, agent: Agent):
+        
+        #Agents can only see their own goal now, no option to see others
         goal_poses = []
-        if self.observe_all_goals:
-            for a in self.world.agents:
-                goal_poses.append(agent.state.pos - a.goal.state.pos)
-        else:
-            goal_poses.append(agent.state.pos - agent.goal.state.pos)
+        goal_poses.append(agent.state.pos - agent.goal.state.pos)
+        
         return torch.cat(
             [
                 agent.episode_name,
