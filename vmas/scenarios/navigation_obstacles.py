@@ -28,8 +28,10 @@ class Scenario(BaseScenario):
         self.collisions = kwargs.get("collisions", True)
 
         self.observe_all_goals = kwargs.get("observe_all_goals", False)
+        self.agents_with_same_goal = kwargs.get("agents_with_same_goal", 1)
+        self.split_goals = kwargs.get("split_goals", False)
 
-        self.agent_radius = kwargs.get("agent_radius", 0.1)
+        self.agent_radius = kwargs.get("agent_radius", 0.25)
         self.obstacle_dim = kwargs.get("obstacle_dim", 1)
         self.lidar_range = kwargs.get("lidar_range", self.agent_radius*2)
         self.comms_range = kwargs.get("comms_range", 0)
@@ -112,7 +114,7 @@ class Scenario(BaseScenario):
             obstacle = Landmark(
                 name = f"Obstacle at {coord}",
                 collide = True,
-                shape = Box(1,1),
+                shape = Box(self.obstacle_dim, self.obstacle_dim),
                 collision_filter = lambda e: isinstance(e, Agent)
             )
             world.add_landmark(obstacle)   
@@ -183,7 +185,7 @@ class Scenario(BaseScenario):
         if env_index is not None:
             occupied_positions = occupied_positions[env_index].unsqueeze(0)
 
-        # set goal_poses
+        # generate goal_poses
         goal_poses = []
         for _ in self.world.agents:
             position = ScenarioUtils.find_random_pos_for_entity(
@@ -198,6 +200,14 @@ class Scenario(BaseScenario):
             occupied_positions = torch.cat([occupied_positions, position], dim=1)
 
         for i, agent in enumerate(self.world.agents):
+            if self.split_goals:
+                goal_index = int(i // self.agents_with_same_goal)
+            else:
+                goal_index = 0 if i < self.agents_with_same_goal else i
+
+            # set goal poses
+            agent.goal.set_pos(goal_poses[goal_index], batch_index=env_index)
+
             if env_index is None:
                 agent.pos_shaping = (
                     torch.linalg.vector_norm(
