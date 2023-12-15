@@ -146,6 +146,9 @@ class Scenario(BaseScenario):
         return grid, (0, width), (0, height)
     
     def reset_world_at(self, env_index: int = None):
+        # TODO: for some reason the env_index is not None at some point during training, which breaks resetting
+        env_index = None
+
         # store positions occupied by obstacles
         occupied_obstacles = torch.zeros((self.world.batch_dim, len(self.world.landmarks[self.n_agents:]), 2), 
                                          dtype=torch.float32,
@@ -161,7 +164,7 @@ class Scenario(BaseScenario):
                 ),
                 batch_index = env_index
             )
-            occupied_obstacles[:, i, :] = self.world.landmarks[i+self.n_agents].state.pos
+            occupied_obstacles[:, i] = self.world.landmarks[i+self.n_agents].state.pos
 
         ScenarioUtils.spawn_entities_randomly(
             self.world.agents,
