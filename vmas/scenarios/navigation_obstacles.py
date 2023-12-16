@@ -42,7 +42,7 @@ class Scenario(BaseScenario):
 
         self.agent_collision_penalty = kwargs.get("agent_collision_penalty", -1)
 
-        self.map, self.x_bounds, self.y_bounds = self.parse_map(kwargs.get('map'))
+        self.map, self.x_bounds, self.y_bounds = self.parse_map(kwargs.get("map", "default"))
         
         self.min_distance_between_entities = self.obstacle_dim + self.agent_radius + 0.05
         self.min_collision_distance = 0.005
@@ -146,7 +146,7 @@ class Scenario(BaseScenario):
         return grid, (0, width), (0, height)
     
     def reset_world_at(self, env_index: int = None):
-        # TODO: for some reason the env_index is not None at some point during training, which breaks resetting
+        # TODO [Shalin]: env_index is randomly not None during training, which breaks resetting
         env_index = None
 
         # store positions occupied by obstacles
@@ -154,7 +154,7 @@ class Scenario(BaseScenario):
                                          dtype=torch.float32,
                                          device=self.world.device)
 
-        #NOTE: this needs to happen every reset to be compatible with BaseScenario reset
+        # NOTE: this needs to happen every reset to be compatible with BaseScenario reset
         for i, pos in enumerate(torch.nonzero(self.map == 1)):
             self.world.landmarks[i+self.n_agents].set_pos(
                 torch.tensor(
@@ -166,6 +166,8 @@ class Scenario(BaseScenario):
             )
             occupied_obstacles[:, i] = self.world.landmarks[i+self.n_agents].state.pos
 
+        # spawn agent positions randomly
+        # TODO [Shalin]: update agent position reset for swap and alcove
         ScenarioUtils.spawn_entities_randomly(
             self.world.agents,
             self.world,
