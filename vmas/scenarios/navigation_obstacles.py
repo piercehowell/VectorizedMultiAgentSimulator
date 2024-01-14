@@ -1,5 +1,10 @@
 '''
-navigation.py with obstacles loaded in.
+Modified navigation.py for the het-mamp project.
+
+Three intended modes:
+1. swap - agents will swap with eachother's positions.
+2. alcove - agent has to give way for another agent.
+3. navigation - agent has to navigate to goal with obstacles and other agents.
 '''
 
 import os
@@ -24,7 +29,7 @@ class Scenario(BaseScenario):
     def make_world(self, batch_dim: int, device: torch.device, **kwargs):
         self.device = device
         self.plot_grid = False
-        self.n_agents = kwargs.get("n_agents", 4)
+        self.n_agents = kwargs.get("n_agents", 2)
         self.collisions = kwargs.get("collisions", True)
 
         self.observe_all_goals = kwargs.get("observe_all_goals", False)
@@ -42,7 +47,8 @@ class Scenario(BaseScenario):
 
         self.agent_collision_penalty = kwargs.get("agent_collision_penalty", -1)
 
-        self.map, self.x_bounds, self.y_bounds = self.parse_map(kwargs.get("map", "default"))
+        self.map_name = kwargs.get("map", "swap")
+        self.map, self.x_bounds, self.y_bounds = self.parse_map(self.map_name)
         
         self.min_distance_between_entities = self.obstacle_dim + self.agent_radius + 0.05
         self.min_collision_distance = 0.005
@@ -166,17 +172,57 @@ class Scenario(BaseScenario):
             )
             occupied_obstacles[:, i] = self.world.landmarks[i+self.n_agents].state.pos
 
-        # spawn agent positions randomly
-        # TODO [Shalin]: update agent position reset for swap and alcove
-        ScenarioUtils.spawn_entities_randomly(
-            self.world.agents,
-            self.world,
-            env_index,
-            self.min_distance_between_entities,
-            self.x_bounds,
-            self.y_bounds,
-            occupied_positions=occupied_obstacles
-        )
+        if self.map_name == "alcove":
+            # spawn first agent position in left side of map (with noise)
+            self.world.agents[0].set_pos(
+                torch.tensor(
+                    [
+                        self.x_bounds[0] + self.obstacle_dim + 2*self.agent_radius, 
+                        (self.y_bounds[1] - self.obstacle_dim) / 2
+                    ],
+                    dtype=torch.float32,
+                    device=self.world.device,
+                )
+                + torch.zeros(
+                    self.world.dim_p,
+                    device=self.world.device,
+                ).uniform_(
+                    -0.02,
+                    0.02,
+                ),
+                batch_index=env_index
+            )
+
+            # spawn second agent position in right side of map (with noise)
+            self.world.agents[1].set_pos(
+                torch.tensor(
+                    [
+                        self.x_bounds[1] - 2*self.obstacle_dim - 2*self.agent_radius,
+                        (self.y_bounds[1] - self.obstacle_dim) / 2
+                    ],
+                    dtype=torch.float32,
+                    device=self.world.device,
+                )
+                + torch.zeros(
+                    self.world.dim_p,
+                    device=self.world.device,
+                ).uniform_(
+                    -0.02,
+                    0.02,
+                ),
+                batch_index=env_index
+            )
+        else:
+            # spawn agents randomly within map
+            ScenarioUtils.spawn_entities_randomly(
+                self.world.agents,
+                self.world,
+                env_index,
+                self.min_distance_between_entities,
+                self.x_bounds,
+                self.y_bounds,
+                occupied_positions=occupied_obstacles
+            )
 
         # store positions occupied by agents
         occupied_agents = torch.stack(
@@ -192,17 +238,23 @@ class Scenario(BaseScenario):
 
         # generate goal_poses
         goal_poses = []
-        for _ in self.world.agents:
-            position = ScenarioUtils.find_random_pos_for_entity(
-                occupied_positions=occupied_positions,
-                env_index=env_index,
-                world=self.world,
-                min_dist_between_entities=self.min_distance_between_entities,
-                x_bounds=self.x_bounds,
-                y_bounds=self.y_bounds,
-            )
-            goal_poses.append(position.squeeze(1))
-            occupied_positions = torch.cat([occupied_positions, position], dim=1)
+        if self.map_name == "alcove" or self.map_name == "swap":
+            # shift poses by 1 so agents are swapping with another agent pose
+            for i in range(self.n_agents):
+                goal_poses.append(self.world.agents[(i+1) % self.n_agents].state.pos)
+        else:
+            # randomly generate goal poses
+            for _ in self.world.agents:
+                position = ScenarioUtils.find_random_pos_for_entity(
+                    occupied_positions=occupied_positions,
+                    env_index=env_index,
+                    world=self.world,
+                    min_dist_between_entities=self.min_distance_between_entities,
+                    x_bounds=self.x_bounds,
+                    y_bounds=self.y_bounds,
+                )
+                goal_poses.append(position.squeeze(1))
+                occupied_positions = torch.cat([occupied_positions, position], dim=1)
 
         for i, agent in enumerate(self.world.agents):
             if self.split_goals:
