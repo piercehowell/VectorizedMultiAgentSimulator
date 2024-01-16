@@ -1,5 +1,7 @@
 <?xml version="1.0" ?>
 <root>
+    <agent start_i="1.5" start_j="4" goal_i="6.5" goal_j="4"/>
+    <agent start_i="6.5" start_j="4" goal_i="1.5" goal_j="4"/>
     <map>
         <width>9</width>
         <height>9</height>

@@ -45,17 +45,18 @@ class Scenario(BaseScenario):
         self.pos_shaping_factor = kwargs.get("pos_shaping_factor", 1)
         self.final_reward = kwargs.get("final_reward", 0.01)
 
-        self.agent_collision_penalty = kwargs.get("agent_collision_penalty", -1)
+        self.agent_agent_collision_penalty = kwargs.get("agent_agent_collision_penalty", -1)
+        self.agent_obstacle_collision_penalty = kwargs.get("agent_obstacle_collision_penalty", -1)
 
-        self.map_name = kwargs.get("map", "swap")
-        self.map, self.x_bounds, self.y_bounds = self.parse_map(self.map_name)
+        self.map_name = kwargs.get("map", "alcove")
+        self.map, self.x_bounds, self.y_bounds, self.start_poses, self.goal_poses = self.parse_map(self.map_name)
         
         self.min_distance_between_entities = self.obstacle_dim + self.agent_radius + 0.05
         self.min_collision_distance = 0.005
 
         controller_params = [2, 6, 0.002]
 
-         # Make world
+        # Make world
         world = World(batch_dim, device, substeps=2)
 
         known_colors = [
@@ -71,6 +72,10 @@ class Scenario(BaseScenario):
             (max(self.n_agents - len(known_colors), 0), 3), device=device
         )
         entity_filter_agents: Callable[[Entity], bool] = lambda e: isinstance(e, Agent) or isinstance(e, Landmark) and e.collide
+
+        # if running in alcove mode, ensure only 2 agents
+        if (self.map_name == "alcove"):
+            self.n_agents = 2
 
         # Add agents
         for i in range(self.n_agents):
@@ -143,13 +148,24 @@ class Scenario(BaseScenario):
         # Initialize a numpy array to store the grid
         grid = torch.zeros((height, width), dtype=torch.int, device=self.device)
 
+        # Parse agent start and goal positions
+        start_poses = []
+        goal_poses = []
+        for agent in map_root.findall('.//agent'):
+            start_x = float(agent.get('start_i'))
+            start_y = float(agent.get('start_j'))
+            goal_x = float(agent.get('goal_i'))
+            goal_y = float(agent.get('goal_j'))
+            start_poses.append([start_x, start_y])
+            goal_poses.append([goal_x, goal_y])
+
         # Find all row elements and populate the numpy array
         row_elements = map_root.findall('.//row')
         for i, row_element in enumerate(row_elements):
             row_data = row_element.text.split()
             for j, value in enumerate(row_data):
                 grid[height - 1 - i, j] = int(value)
-        return grid, (0, width), (0, height)
+        return grid, (0, width), (0, height), start_poses, goal_poses
     
     def reset_world_at(self, env_index: int = None):
         # TODO [Shalin]: env_index is randomly not None during training, which breaks resetting
@@ -172,7 +188,19 @@ class Scenario(BaseScenario):
             )
             occupied_obstacles[:, i] = self.world.landmarks[i+self.n_agents].state.pos
 
-        if self.map_name == "alcove":
+        # set agent start poses
+        if self.start_poses:
+            # if start poses specified in xml, use those when resetting
+            for i, agent in enumerate(self.world.agents):
+                agent.set_pos(
+                    torch.tensor(
+                        self.start_poses[i],
+                        dtype=torch.float32,
+                        device=self.world.device
+                    ),
+                    batch_index=env_index
+                )
+        elif self.map_name == "alcove":
             # spawn first agent position in left side of map (with noise)
             self.world.agents[0].set_pos(
                 torch.tensor(
@@ -236,9 +264,19 @@ class Scenario(BaseScenario):
         if env_index is not None:
             occupied_positions = occupied_positions[env_index].unsqueeze(0)
 
-        # generate goal_poses
+        # set agent goal poses
         goal_poses = []
-        if self.map_name == "alcove" or self.map_name == "swap":
+        if self.goal_poses:
+            # if goal poses specified in xml, use those when resetting
+            for i, agent in enumerate(self.world.agents):
+                goal_poses.append(
+                    torch.tensor(
+                        self.goal_poses[i],
+                        dtype=torch.float32,
+                        device=self.world.device
+                    )
+                )
+        elif self.map_name == "alcove" or self.map_name == "swap":
             # shift poses by 1 so agents are swapping with another agent pose
             for i in range(self.n_agents):
                 goal_poses.append(self.world.agents[(i+1) % self.n_agents].state.pos)
@@ -307,10 +345,10 @@ class Scenario(BaseScenario):
                         distance = self.world.get_distance(a, b)
                         a.agent_collision_rew[
                             distance <= self.min_collision_distance
-                        ] += self.agent_collision_penalty
+                        ] += self.agent_agent_collision_penalty
                         b.agent_collision_rew[
                             distance <= self.min_collision_distance
-                        ] += self.agent_collision_penalty
+                        ] += self.agent_agent_collision_penalty
 
             # check for agent-obstacle collisions
             for i, a in enumerate(self.world.agents):
@@ -319,7 +357,7 @@ class Scenario(BaseScenario):
                         distance = self.world.get_distance(a, b)
                         a.agent_collision_rew[
                             distance <= self.min_collision_distance
-                        ] += self.agent_collision_penalty
+                        ] += self.agent_obstacle_collision_penalty
 
         pos_reward = self.pos_rew if self.shared_rew else agent.pos_rew
         return pos_reward + self.final_rew + agent.agent_collision_rew
