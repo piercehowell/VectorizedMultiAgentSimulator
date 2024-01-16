@@ -468,6 +468,7 @@ class Environment(TorchVectorizedObject):
         mode="human",
         env_index=0,
         agent_index_focus: int = None,
+        scene_focus: bool = False,
         visualize_when_rgb: bool = False,
         plot_position_function: Callable = None,
         plot_position_function_precision: float = 0.01,
@@ -494,6 +495,7 @@ class Environment(TorchVectorizedObject):
         :param env_index: Index of the environment to render
         :param agent_index_focus: If specified the camera will stay on the agent with this index.
                                   If None, the camera will stay in the center and zoom out to contain all agents
+        :param scene_focus: If specified, the camera will center on the centroid of the scene and zoom out to include all entities
         :param visualize_when_rgb: Also run human visualization when mode=="rgb_array"
         :param plot_position_function: A function to plot under the rendering.
         The function takes a numpy array with shape (n_points, 2), which represents a set of x,y values to evaluate f over and plot it
@@ -563,7 +565,38 @@ class Environment(TorchVectorizedObject):
         else:
             cam_range = torch.tensor([zoom * aspect_ratio, zoom], device=self.device)
 
-        if shared_viewer:
+        if scene_focus:
+            # get all poses in scene
+            all_poses = torch.stack(
+                [entity.state.pos[env_index] for entity in self.world.landmarks], 
+                dim=0
+            )
+
+            # get max radius of entities in scene
+            max_shape_radius = max(
+                [entity.shape.circumscribed_radius() for entity in self.world.landmarks]
+            )
+
+            # get centroid of scene
+            centroid = torch.mean(all_poses, dim=0)
+
+            # get max distance from centroid
+            side = torch.max(torch.tensor([
+                    torch.max(torch.max(all_poses[:,X]) - centroid[X]),
+                    torch.max(torch.max(all_poses[:,Y]) - centroid[Y]),
+                    torch.max(centroid[X] - torch.min(all_poses[:, X])),
+                    torch.max(centroid[Y] - torch.min(all_poses[:, Y]))
+                ])
+            )
+
+            # set viewer to be square centered around centroid
+            self.viewer.set_bounds(
+                centroid[X] - side - (2 * max_shape_radius),
+                centroid[X] + side + (2 * max_shape_radius),
+                centroid[Y] - side - (2 * max_shape_radius),
+                centroid[Y] + side + (2 * max_shape_radius),
+            )
+        elif shared_viewer:
             # zoom out to fit everyone
             all_poses = torch.stack(
                 [agent.state.pos[env_index] for agent in self.world.agents], dim=0
