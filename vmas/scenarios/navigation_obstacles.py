@@ -48,7 +48,7 @@ class Scenario(BaseScenario):
         self.agent_agent_collision_penalty = kwargs.get("agent_agent_collision_penalty", -1)
         self.agent_obstacle_collision_penalty = kwargs.get("agent_obstacle_collision_penalty", -1)
 
-        self.map_name = kwargs.get("map", "alcove")
+        self.map_name = kwargs.get("map", "grid_map")
         self.map, self.x_bounds, self.y_bounds, self.start_poses, self.goal_poses = self.parse_map(self.map_name)
         
         self.min_distance_between_entities = self.obstacle_dim + self.agent_radius + 0.05
@@ -74,8 +74,7 @@ class Scenario(BaseScenario):
         entity_filter_agents: Callable[[Entity], bool] = lambda e: isinstance(e, Agent) or isinstance(e, Landmark) and e.collide
 
         # if running in alcove mode, ensure only 2 agents
-        if (self.map_name == "alcove"):
-            self.n_agents = 2
+        assert self.n_agents ==2, "Alcove env requires 2 agents"
 
         # Add agents
         for i in range(self.n_agents):

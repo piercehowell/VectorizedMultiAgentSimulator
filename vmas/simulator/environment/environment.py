@@ -468,7 +468,7 @@ class Environment(TorchVectorizedObject):
         mode="human",
         env_index=0,
         agent_index_focus: int = None,
-        scene_focus: bool = False,
+        scene_focus: bool = True,
         visualize_when_rgb: bool = False,
         plot_position_function: Callable = None,
         plot_position_function_precision: float = 0.01,
