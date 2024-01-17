@@ -1,0 +1,14 @@
+<?xml version="1.0" ?>
+<root>
+    <map>
+        <width>5</width>
+        <height>5</height>
+        <grid>
+			<row>0 0 0 0 0</row>
+			<row>0 0 0 0 0</row>
+			<row>0 0 0 0 0</row>
+			<row>0 0 0 0 0</row>
+			<row>0 0 0 0 0</row>
+		</grid>
+    </map>
+</root>
