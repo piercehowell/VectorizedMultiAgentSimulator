@@ -576,6 +576,7 @@ class Environment(TorchVectorizedObject):
             max_shape_radius = max(
                 [entity.shape.circumscribed_radius() for entity in self.world.landmarks]
             )
+            max_shape_radius = max(0.5, max_shape_radius)
 
             # get centroid of scene
             centroid = torch.mean(all_poses, dim=0)
