@@ -74,7 +74,8 @@ class Scenario(BaseScenario):
         entity_filter_agents: Callable[[Entity], bool] = lambda e: isinstance(e, Agent) or isinstance(e, Landmark) and e.collide
 
         # if running in alcove mode, ensure only 2 agents
-        assert self.n_agents == 2, "Alcove env requires 2 agents"
+        if self.map_name == "alcove":
+            assert self.n_agents == 2, "Alcove env requires 2 agents"
 
         # Add agents
         for i in range(self.n_agents):
@@ -395,17 +396,17 @@ class Scenario(BaseScenario):
         )
 
     def done(self):
-        return torch.stack(
-            [
-                torch.linalg.vector_norm(
-                    agent.state.pos - agent.goal.state.pos,
-                    dim=-1,
-                )
-                < agent.shape.radius
-                for agent in self.world.agents
-            ],
-            dim=-1,
-        ).all(-1)
+        for agent in self.world.agents:
+            agent.distance_to_goal = torch.linalg.vector_norm(
+                agent.state.pos - agent.goal.state.pos,
+                dim=-1,
+            )
+            agent.on_goal = agent.distance_to_goal < agent.goal.shape.radius
+
+        self.all_goal_reached = torch.all(
+            torch.stack([a.on_goal for a in self.world.agents], dim=-1), dim=-1
+        )
+        return self.all_goal_reached
 
     def info(self, agent: Agent) -> Dict[str, Tensor]:
         return {
