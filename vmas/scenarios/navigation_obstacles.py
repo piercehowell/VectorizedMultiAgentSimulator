@@ -396,17 +396,17 @@ class Scenario(BaseScenario):
         )
 
     def done(self):
-        return torch.stack(
-            [
-                torch.linalg.vector_norm(
-                    agent.state.pos - agent.goal.state.pos,
-                    dim=-1,
-                )
-                < agent.shape.radius
-                for agent in self.world.agents
-            ],
-            dim=-1,
-        ).all(-1)
+        for agent in self.world.agents:
+            agent.distance_to_goal = torch.linalg.vector_norm(
+                agent.state.pos - agent.goal.state.pos,
+                dim=-1,
+            )
+            agent.on_goal = agent.distance_to_goal < agent.goal.shape.radius
+
+        self.all_goal_reached = torch.all(
+            torch.stack([a.on_goal for a in self.world.agents], dim=-1), dim=-1
+        )
+        return self.all_goal_reached
 
     def info(self, agent: Agent) -> Dict[str, Tensor]:
         return {
