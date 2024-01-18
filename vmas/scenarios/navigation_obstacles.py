@@ -74,7 +74,8 @@ class Scenario(BaseScenario):
         entity_filter_agents: Callable[[Entity], bool] = lambda e: isinstance(e, Agent) or isinstance(e, Landmark) and e.collide
 
         # if running in alcove mode, ensure only 2 agents
-        assert self.n_agents == 2, "Alcove env requires 2 agents"
+        if self.map_name == "alcove":
+            assert self.n_agents == 2, "Alcove env requires 2 agents"
 
         # Add agents
         for i in range(self.n_agents):
