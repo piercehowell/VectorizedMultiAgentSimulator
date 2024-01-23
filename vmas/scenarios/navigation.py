@@ -35,7 +35,6 @@ class Scenario(BaseScenario):
         self.shared_rew = kwargs.get("shared_rew", True)
         self.pos_shaping_factor = kwargs.get("pos_shaping_factor", 1)
         self.final_reward = kwargs.get("final_reward", 0.01)
-        self.living_penalty = kwargs.get("living_penalty", 0)
 
         self.agent_collision_penalty = kwargs.get("agent_collision_penalty", -1)
 
@@ -158,7 +157,7 @@ class Scenario(BaseScenario):
             if env_index is None:
                 agent.pos_shaping = (
                     torch.linalg.vector_norm(
-                        agent.goal.state.pos - agent.state.pos,
+                        agent.state.pos - agent.goal.state.pos,
                         dim=1,
                     )
                     * self.pos_shaping_factor
@@ -166,7 +165,7 @@ class Scenario(BaseScenario):
             else:
                 agent.pos_shaping[env_index] = (
                     torch.linalg.vector_norm(
-                        agent.goal.state.pos[env_index] - agent.state.pos[env_index]
+                        agent.state.pos[env_index] - agent.goal.state.pos[env_index]
                     )
                     * self.pos_shaping_factor
                 )
@@ -202,11 +201,11 @@ class Scenario(BaseScenario):
                         ] += self.agent_collision_penalty
 
         pos_reward = self.pos_rew if self.shared_rew else agent.pos_rew
-        return pos_reward + self.final_rew + agent.agent_collision_rew + self.living_penalty
+        return pos_reward + self.final_rew + agent.agent_collision_rew
 
     def agent_reward(self, agent: Agent):
         agent.distance_to_goal = torch.linalg.vector_norm(
-            agent.goal.state.pos - agent.state.pos,
+            agent.state.pos - agent.goal.state.pos,
             dim=-1,
         )
         agent.on_goal = agent.distance_to_goal < agent.goal.shape.radius
@@ -217,18 +216,18 @@ class Scenario(BaseScenario):
         return agent.pos_rew
 
     def observation(self, agent: Agent):
-        vec_to_goal = []
+        goal_poses = []
         if self.observe_all_goals:
             for a in self.world.agents:
-                vec_to_goal.append(a.goal.state.pos - agent.state.pos)
+                goal_poses.append(agent.state.pos - a.goal.state.pos)
         else:
-            vec_to_goal.append(agent.goal.state.pos - agent.state.pos)
+            goal_poses.append(agent.state.pos - agent.goal.state.pos)
         return torch.cat(
             [
                 agent.state.pos,
                 agent.state.vel,
             ]
-            + vec_to_goal
+            + goal_poses
             + (
                 [agent.sensors[0]._max_range - agent.sensors[0].measure()]
                 if self.collisions
@@ -238,23 +237,17 @@ class Scenario(BaseScenario):
         )
 
     def done(self):
-        all_goal_reached = torch.all(
-            torch.stack([a.on_goal for a in self.world.agents], dim=-1), dim=-1
-        )
-        return all_goal_reached
-
-        # original goal is simply if the goal is w/in radius, so final_reward never given
-        # return torch.stack(
-        #     [
-        #         torch.linalg.vector_norm(
-        #             agent.state.pos - agent.goal.state.pos,
-        #             dim=-1,
-        #         )
-        #         < agent.shape.radius
-        #         for agent in self.world.agents
-        #     ],
-        #     dim=-1,
-        # ).all(-1)
+        return torch.stack(
+            [
+                torch.linalg.vector_norm(
+                    agent.state.pos - agent.goal.state.pos,
+                    dim=-1,
+                )
+                < agent.shape.radius
+                for agent in self.world.agents
+            ],
+            dim=-1,
+        ).all(-1)
 
     def info(self, agent: Agent) -> Dict[str, Tensor]:
         return {
