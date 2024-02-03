@@ -7,6 +7,7 @@ Three intended modes:
 3. navigation - agent has to navigate to goal with obstacles and other agents.
 '''
 
+import numpy as np
 import os
 import torch
 import typing
@@ -15,7 +16,7 @@ import xml.etree.ElementTree as ET
 from torch import Tensor
 from typing import Dict, Callable, List
 from vmas import render_interactively
-from vmas.simulator.core import Agent, Box, Landmark, World, Sphere, Entity
+from vmas.simulator.core import Action, Agent, Box, Landmark, World, Sphere, Entity
 from vmas.simulator.scenario import BaseScenario
 from vmas.simulator.sensors import Lidar
 from vmas.simulator.utils import Color, ScenarioUtils
@@ -36,6 +37,7 @@ class Scenario(BaseScenario):
         self.agents_with_same_goal = kwargs.get("agents_with_same_goal", 1)
         self.split_goals = kwargs.get("split_goals", False)
 
+        self.capability_aware = kwargs.get("capability_aware", False)
         self.agent_radius = kwargs.get("agent_radius", 0.25)
         self.obstacle_dim = kwargs.get("obstacle_dim", 1)
         self.lidar_range = kwargs.get("lidar_range", self.agent_radius*2)
@@ -167,6 +169,42 @@ class Scenario(BaseScenario):
                 grid[height - 1 - i, j] = int(value)
         return grid, (0, width), (0, height), start_poses, goal_poses
     
+    def _reset_capability_at(self, env_index: int = None):
+        """
+        Reset agent capabilities.
+        When a None index is passed to env_index, the world should make a vectorized (batch) reset of capabilities
+        """
+        # TODO: Enable loading from specific teams
+
+        # capabilities [max velocity, agent radius]
+        for agent in self.world.agents:
+            agent_max_v = np.random.uniform(0.10, 0.50)
+            agent_radius = green_agent_radius = np.random.uniform(0.10, 0.25)
+
+            # set capability
+            agent.set_capability(
+                torch.tensor(
+                    [agent_max_v, agent_radius],
+                    dtype=torch.float32,
+                    device=self.world.device
+                ),
+                batch_index=env_index,
+            )
+
+            # update action range
+            agent.action = Action(
+                u_range=agent_max_v,
+                u_multiplier = 1.0,
+                u_noise = None,
+                u_rot_range = 0.0,
+                u_rot_multiplier = 1.0,
+                u_rot_noise = None,
+            )
+
+            agent.action.to(self.world.device)  
+            agent.action.batch_dim = self.world.batch_dim      
+            agent.shape = Sphere(radius=agent_radius)
+    
     def reset_world_at(self, env_index: int = None):
         # TODO [Shalin]: env_index is randomly not None during training, which breaks resetting
         env_index = None
@@ -294,6 +332,10 @@ class Scenario(BaseScenario):
                 goal_poses.append(position.squeeze(1))
                 occupied_positions = torch.cat([occupied_positions, position], dim=1)
 
+        # reset the capabilities of agents
+        if self.capability_aware: 
+            self._reset_capability_at(env_index)
+
         for i, agent in enumerate(self.world.agents):
             if self.split_goals:
                 goal_index = int(i // self.agents_with_same_goal)
@@ -392,6 +434,7 @@ class Scenario(BaseScenario):
                 if self.collisions
                 else []
             ),
+            + agent.state.capability if self.capability_aware else [],
             dim=-1,
         )
 
@@ -445,6 +488,6 @@ class Scenario(BaseScenario):
 
 if __name__ == "__main__":
     render_interactively(
-        __file__,
+        "navigation_obstacles",
         control_two_agents=True,
     )
