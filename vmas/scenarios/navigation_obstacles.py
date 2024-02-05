@@ -433,9 +433,11 @@ class Scenario(BaseScenario):
                 [agent.sensors[0]._max_range - agent.sensors[0].measure()]
                 if self.collisions
                 else []
+            )
+            + (
+                [agent.state.capability] if self.capability_aware else []
             ),
-            + agent.state.capability if self.capability_aware else [],
-            dim=-1,
+            dim=-1
         )
 
     def done(self):
