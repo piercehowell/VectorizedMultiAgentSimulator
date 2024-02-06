@@ -50,7 +50,7 @@ class Scenario(BaseScenario):
         self.agent_agent_collision_penalty = kwargs.get("agent_agent_collision_penalty", -1)
         self.agent_obstacle_collision_penalty = kwargs.get("agent_obstacle_collision_penalty", -1)
 
-        self.map_name = kwargs.get("map", "swap")
+        self.map_name = kwargs.get("map", "alcove")
         self.map, self.x_bounds, self.y_bounds, self.start_poses, self.goal_poses = self.parse_map(self.map_name)
         
         self.min_distance_between_entities = self.obstacle_dim + self.agent_radius + 0.05
@@ -178,8 +178,8 @@ class Scenario(BaseScenario):
 
         # capabilities [max velocity, agent radius]
         for agent in self.world.agents:
-            agent_max_v = np.random.uniform(0.10, 0.50)
-            agent_radius = green_agent_radius = np.random.uniform(0.10, 0.25)
+            agent_max_v = np.random.uniform(0.10, 1)
+            agent_radius = np.random.uniform(0.10, 0.50)
 
             # set capability
             agent.set_capability(
@@ -491,5 +491,6 @@ class Scenario(BaseScenario):
 if __name__ == "__main__":
     render_interactively(
         "navigation_obstacles",
+        capability_aware=True,
         control_two_agents=True,
     )
