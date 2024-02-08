@@ -7,6 +7,8 @@ from typing import Dict, Callable, List
 import torch
 from torch import Tensor
 
+import numpy as np
+
 from vmas import render_interactively
 from vmas.simulator.core import Agent, Landmark, World, Sphere, Box, Entity
 from vmas.simulator.heuristic_policy import BaseHeuristicPolicy
@@ -17,7 +19,7 @@ from vmas.simulator.dynamics.waypoint_tracker import WaypointTracker
 from vmas.simulator.dynamics.diff_drive import DiffDrive
 from vmas.simulator.dynamics.holonomic import Holonomic
 from vmas.simulator.dynamics.kinematic_bicycle import KinematicBicycle
-import colorsys
+from copy import deepcopy
 
 if typing.TYPE_CHECKING:
     from vmas.simulator.rendering import Geom
@@ -29,7 +31,7 @@ DYNAMIC_MODELS = {'holonomic': Holonomic,
 class Scenario(BaseScenario):
     def make_world(self, batch_dim: int, device: torch.device, **kwargs):
         self.plot_grid = False
-        self.n_agents = kwargs.get("n_agents", 2)
+        self.n_agents = kwargs.get("n_agents", 3)
         self.collisions = kwargs.get("collisions", True)
 
         self.agents_with_same_goal = kwargs.get("agents_with_same_goal", 1)
@@ -52,13 +54,14 @@ class Scenario(BaseScenario):
 
         self.robots_file = kwargs.get("robots",
                                  {'name': 'robots_0', # name of the robots file/pool
-                                  'robots': {
+                                  'robots':
                                       # list of robots in the robot pool
                                       [ 
-                                          {'id': "01", 'dynamics': 'holonomic'},
-                                          {'id': "10", 'dynamics': 'differential'}
+                                          {'id': "01", 'dynamics': 'bicycle'},
+                                          {'id': "10", 'dynamics': 'differential'},
+                                          {'id': "11", 'dynamics': 'holonomic'}
                                       ]
-                                  }})
+                                  })
 
         assert 1 <= self.agents_with_same_goal <= self.n_agents
         if self.agents_with_same_goal > 1:
@@ -101,26 +104,30 @@ class Scenario(BaseScenario):
         #   green = differential
         #   blue = bicycle.
         motion_model_colors_hsl = {
-            'holonomic': [0, 100, 50],
-            'differential': [120, 100, 50],
-            'bicycle': [240, 100, 50]
+            'holonomic': [1,0,0],
+            'differential': [0,1,0],
+            'bicycle': [0,0,1]
         }
         # Unpack the robot pool
         self.robots = self.robots_file['robots'] # list of dictionaries
         # Add agents
-        sensors=[Lidar(world,
-                        n_rays=12,
-                        max_range=self.lidar_range,
-                        entity_filter=entity_filter_agents)]
+        
         self.agent_list = []
         for robot in self.robots:
             agent_id = robot['id']
             agent_dynamics = robot['dynamics']
+            sensors=[Lidar(world,
+                        n_rays=12,
+                        max_range=self.lidar_range,
+                        entity_filter=entity_filter_agents)]
+            
+            color = motion_model_colors_hsl[agent_dynamics]
 
             if agent_dynamics == 'holonomic':
                 agent = Agent(
                     name=f"agent_{agent_id}_holo",
                     collide=True,
+                    color=color,
                     shape=Sphere(0.1),
                     render_action=True,
                     u_range=[1, 1],
@@ -133,6 +140,7 @@ class Scenario(BaseScenario):
                 agent = Agent(
                     name=f"agent_{agent_id}_diff",
                     collide=True,
+                    color=color,
                     shape=Sphere(0.1),
                     render_action=True,
                     u_range=[1, 1],
@@ -147,6 +155,7 @@ class Scenario(BaseScenario):
                     name=f"agent_{agent_id}_bicycle",
                     shape=Box(length=l_f + l_r, width=width),
                     collide=True,
+                    color=color,
                     render_action=True,
                     u_range=[1, max_steering_angle],
                     u_multiplier=[1, 1],
@@ -163,7 +172,6 @@ class Scenario(BaseScenario):
             else:
                 raise ValueError(f"Undefined agent dynamics {agent_dynamics}")
             # set agents color
-            color = colorsys.hls_to_rgb(motion_model_colors_hsl[agent_dynamics])
 
             # Constraint: all agents have same action range and multiplier
             # agent = Agent(
@@ -189,7 +197,6 @@ class Scenario(BaseScenario):
             # )
             agent.pos_rew = torch.zeros(batch_dim, device=device)
             agent.agent_collision_rew = agent.pos_rew.clone()
-            world.add_agent(agent)
 
             # Add goals
             goal = Landmark(
@@ -197,8 +204,10 @@ class Scenario(BaseScenario):
                 collide=False,
                 color=color,
             )
+
             world.add_landmark(goal)
             agent.goal = goal
+            world.add_agent(agent)
             self.agent_list.append(agent)
 
         self.pos_rew = torch.zeros(batch_dim, device=device)
@@ -234,7 +243,7 @@ class Scenario(BaseScenario):
             )
             goal_poses.append(position.squeeze(1))
             occupied_positions = torch.cat([occupied_positions, position], dim=1)
-
+        # print(self.world.agents)
         for i, agent in enumerate(self.world.agents):
             if self.split_goals:
                 goal_index = int(i // self.agents_with_same_goal)
@@ -332,7 +341,7 @@ class Scenario(BaseScenario):
                     agent.state.pos - agent.goal.state.pos,
                     dim=-1,
                 )
-                < agent.shape.radius
+                < (agent.shape.radius if isinstance(agent.shape, Sphere) else agent.shape.width)
                 for agent in self.world.agents
             ],
             dim=-1,
