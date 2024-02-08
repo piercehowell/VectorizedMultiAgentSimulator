@@ -14,6 +14,7 @@ from vmas.simulator.scenario import BaseScenario
 from vmas.simulator.sensors import Lidar
 from vmas.simulator.utils import Color, ScenarioUtils, X, Y
 from vmas.simulator.dynamics.waypoint_tracker import WaypointTracker
+from vmas.simulator.controllers.velocity_controller import VelocityController
 
 
 if typing.TYPE_CHECKING:
@@ -84,15 +85,16 @@ class Scenario(BaseScenario):
             )
 
             # Constraint: all agents have same action range and multiplier
+            # TODO: fact check this, I'm pretty sure they can have different ones BUT same across vectorized envs
             agent = Agent(
                 name=f"agent_{i}",
                 collide=self.collisions,
                 color=color,
                 shape=Sphere(radius=self.agent_radius),
                 render_action=True,
-                u_range=10,
+                u_range=100, # this is urange for VMAS, not for the RL agent
                 u_multiplier=1,
-                dynamics=WaypointTracker(world),
+                # dynamics=WaypointTracker(world),
                 sensors=[
                     Lidar(
                         world,
@@ -106,6 +108,12 @@ class Scenario(BaseScenario):
             )
             agent.pos_rew = torch.zeros(batch_dim, device=device)
             agent.agent_collision_rew = agent.pos_rew.clone()
+
+            controller_params = [0.2, 0.6, 0.0002]
+            agent.controller = VelocityController(
+                agent, world, controller_params, "standard"
+            )
+
             world.add_agent(agent)
 
             # Add goals
