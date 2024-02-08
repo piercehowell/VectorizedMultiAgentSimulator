@@ -52,13 +52,13 @@ class Scenario(BaseScenario):
 
         self.robots_file = kwargs.get("robots",
                                  {'name': 'robots_0', # name of the robots file/pool
-                                  'robots': {
+                                  'robots':
                                       # list of robots in the robot pool
                                       [ 
                                           {'id': "01", 'dynamics': 'holonomic'},
                                           {'id': "10", 'dynamics': 'differential'}
                                       ]
-                                  }})
+                                  })
 
         assert 1 <= self.agents_with_same_goal <= self.n_agents
         if self.agents_with_same_goal > 1:
