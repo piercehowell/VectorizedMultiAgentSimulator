@@ -31,7 +31,6 @@ DYNAMIC_MODELS = {'holonomic': Holonomic,
 class Scenario(BaseScenario):
     def make_world(self, batch_dim: int, device: torch.device, **kwargs):
         self.plot_grid = False
-        self.n_agents = kwargs.get("n_agents", 3)
         self.collisions = kwargs.get("collisions", True)
 
         self.agents_with_same_goal = kwargs.get("agents_with_same_goal", 1)
@@ -52,14 +51,19 @@ class Scenario(BaseScenario):
         self.world_semidim = 1
         self.min_collision_distance = 0.005
 
+        # Build all of the agents from a 'robots' file. Each robot shall have
+        # an ID (binary), a motion model, maximum speed (dynamics profile), and a 
+        # geometry profile. The function should receive the robots file as a dictionary
+        self.n_agents = kwargs.get("n_agents", 3)
         self.robots_file = kwargs.get("robots",
+                                # default 3 agents
                                  {'name': 'robots_0', # name of the robots file/pool
                                   'robots':
                                       # list of robots in the robot pool
                                       [ 
-                                          {'id': "01", 'dynamics': 'bicycle'},
-                                          {'id': "10", 'dynamics': 'differential'},
-                                          {'id': "11", 'dynamics': 'holonomic'}
+                                          {'id': "001", 'dynamics': 'bicycle'},
+                                          {'id': "010", 'dynamics': 'differential'},
+                                          {'id': "100", 'dynamics': 'holonomic'}
                                       ]
                                   })
 
@@ -80,26 +84,9 @@ class Scenario(BaseScenario):
         # Make world
         world = World(batch_dim, device, substeps=2)
 
-        # known_colors = [
-        #     (0.22, 0.49, 0.72),
-        #     (1.00, 0.50, 0),
-        #     (0.30, 0.69, 0.29),
-        #     (0.97, 0.51, 0.75),
-        #     (0.60, 0.31, 0.64),
-        #     (0.89, 0.10, 0.11),
-        #     (0.87, 0.87, 0),
-        # ]
-        # colors = torch.randn(
-        #     (max(self.n_agents - len(known_colors), 0), 3), device=device
-        # )
         entity_filter_agents: Callable[[Entity], bool] = lambda e: isinstance(e, Agent)
-        # Add agents
-        # TODO: Build all of the agents from a 'robots' file. Each robot shall have
-        # an ID (binary), a motion model, maximum speed (dynamics profile), and a 
-        # geometry profile. The function should receive the robots file as a dictionary
-        
-            
-        # TODO: Set color to be based on kinematic model
+
+        # Set color to be based on kinematic model
         #   red = holonomic
         #   green = differential
         #   blue = bicycle.
@@ -157,8 +144,8 @@ class Scenario(BaseScenario):
                     collide=True,
                     color=color,
                     render_action=True,
-                    u_range=[1, max_steering_angle],
-                    u_multiplier=[1, 1],
+                    u_range=[1, 1],
+                    u_multiplier=[1, max_steering_angle],
                     dynamics=KinematicBicycle(
                         world,
                         width=width,
@@ -171,30 +158,7 @@ class Scenario(BaseScenario):
                 )
             else:
                 raise ValueError(f"Undefined agent dynamics {agent_dynamics}")
-            # set agents color
 
-            # Constraint: all agents have same action range and multiplier
-            # agent = Agent(
-            #     name=f"agent_{agent_id}",
-            #     collide=self.collisions,
-            #     color=color,
-            #     shape=agent_shape,
-            #     render_action=True,
-            #     u_range=10,
-            #     u_multiplier=1,
-            #     # dynamics=WaypointTracker(world),
-            #     dynamics=agent_dynamics_callable,
-            #     sensors=[
-            #         Lidar(
-            #             world,
-            #             n_rays=12,
-            #             max_range=self.lidar_range,
-            #             entity_filter=entity_filter_agents,
-            #         ),
-            #     ]
-            #     if self.collisions
-            #     else None,
-            # )
             agent.pos_rew = torch.zeros(batch_dim, device=device)
             agent.agent_collision_rew = agent.pos_rew.clone()
 
