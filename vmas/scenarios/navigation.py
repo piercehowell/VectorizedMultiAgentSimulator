@@ -17,10 +17,12 @@ from vmas.simulator.scenario import BaseScenario
 from vmas.simulator.sensors import Lidar
 from vmas.simulator.utils import Color, ScenarioUtils, X, Y
 from vmas.simulator.dynamics.waypoint_tracker import WaypointTracker
+from vmas.simulator.controllers.velocity_controller import VelocityController
 from vmas.simulator.dynamics.diff_drive import DiffDrive
 from vmas.simulator.dynamics.holonomic import Holonomic
 from vmas.simulator.dynamics.kinematic_bicycle import KinematicBicycle
 from copy import deepcopy
+
 
 if typing.TYPE_CHECKING:
     from vmas.simulator.rendering import Geom
@@ -98,8 +100,8 @@ class Scenario(BaseScenario):
         }
         # Unpack the robot pool
         self.robots = self.robots_file['robots'] # list of dictionaries
-        # Add agents
         
+        # Add agents
         self.agent_list = []
         for robot in self.robots:
             agent_id = robot['id']
@@ -162,6 +164,11 @@ class Scenario(BaseScenario):
 
             agent.pos_rew = torch.zeros(batch_dim, device=device)
             agent.agent_collision_rew = agent.pos_rew.clone()
+
+            controller_params = [0.2, 0.6, 0.0002]
+            agent.controller = VelocityController(
+                agent, world, controller_params, "standard"
+            )
 
             # Add goals
             goal = Landmark(
