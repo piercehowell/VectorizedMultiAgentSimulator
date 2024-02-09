@@ -290,7 +290,7 @@ class EntityState(TorchVectorizedObject):
                 else:
                     attr[env_index] = 0.0
 
-    def _spawn(self, dim_c: int, dim_p: int, dim_capability: int):
+    def _spawn(self, dim_c: int, dim_p: int, dim_capability: int=None):
         self.pos = torch.zeros(
             self.batch_dim, dim_p, device=self.device, dtype=torch.float32
         )
