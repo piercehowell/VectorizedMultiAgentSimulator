@@ -7,24 +7,33 @@ from typing import Dict, Callable, List
 import torch
 from torch import Tensor
 
+import numpy as np
+
 from vmas import render_interactively
-from vmas.simulator.core import Agent, Landmark, World, Sphere, Entity
+
+from vmas.simulator.core import Agent, Landmark, World, Sphere, Box, Entity
 from vmas.simulator.heuristic_policy import BaseHeuristicPolicy
 from vmas.simulator.scenario import BaseScenario
 from vmas.simulator.sensors import Lidar
 from vmas.simulator.utils import Color, ScenarioUtils, X, Y
 from vmas.simulator.dynamics.waypoint_tracker import WaypointTracker
 from vmas.simulator.controllers.velocity_controller import VelocityController
+from vmas.simulator.dynamics.diff_drive import DiffDrive
+from vmas.simulator.dynamics.holonomic import Holonomic
+from vmas.simulator.dynamics.kinematic_bicycle import KinematicBicycle
+from copy import deepcopy
 
 
 if typing.TYPE_CHECKING:
     from vmas.simulator.rendering import Geom
 
+DYNAMIC_MODELS = {'holonomic': Holonomic, 
+                  'differential': DiffDrive,
+                  'bicycle': KinematicBicycle}
 
 class Scenario(BaseScenario):
     def make_world(self, batch_dim: int, device: torch.device, **kwargs):
         self.plot_grid = False
-        self.n_agents = kwargs.get("n_agents", 4)
         self.collisions = kwargs.get("collisions", True)
 
         self.agents_with_same_goal = kwargs.get("agents_with_same_goal", 1)
@@ -45,6 +54,22 @@ class Scenario(BaseScenario):
         self.world_semidim = 1
         self.min_collision_distance = 0.005
 
+        # Build all of the agents from a 'robots' file. Each robot shall have
+        # an ID (binary), a motion model, maximum speed (dynamics profile), and a 
+        # geometry profile. The function should receive the robots file as a dictionary
+        self.n_agents = kwargs.get("n_agents", 3)
+        self.robots_file = kwargs.get("robots",
+                                # default 3 agents
+                                 {'name': 'robots_0', # name of the robots file/pool
+                                  'robots':
+                                      # list of robots in the robot pool
+                                      [ 
+                                          {'id': "001", 'dynamics': 'bicycle'},
+                                          {'id': "010", 'dynamics': 'differential'},
+                                          {'id': "100", 'dynamics': 'holonomic'}
+                                      ]
+                                  })
+
         assert 1 <= self.agents_with_same_goal <= self.n_agents
         if self.agents_with_same_goal > 1:
             assert (
@@ -62,50 +87,81 @@ class Scenario(BaseScenario):
         # Make world
         world = World(batch_dim, device, substeps=2)
 
-        known_colors = [
-            (0.22, 0.49, 0.72),
-            (1.00, 0.50, 0),
-            (0.30, 0.69, 0.29),
-            (0.97, 0.51, 0.75),
-            (0.60, 0.31, 0.64),
-            (0.89, 0.10, 0.11),
-            (0.87, 0.87, 0),
-        ]
-        colors = torch.randn(
-            (max(self.n_agents - len(known_colors), 0), 3), device=device
-        )
         entity_filter_agents: Callable[[Entity], bool] = lambda e: isinstance(e, Agent)
 
+        # Set color to be based on kinematic model
+        #   red = holonomic
+        #   green = differential
+        #   blue = bicycle.
+        motion_model_colors_hsl = {
+            'holonomic': [1,0,0],
+            'differential': [0,1,0],
+            'bicycle': [0,0,1]
+        }
+        # Unpack the robot pool
+        self.robots = self.robots_file['robots'] # list of dictionaries
+        
         # Add agents
-        for i in range(self.n_agents):
-            color = (
-                known_colors[i]
-                if i < len(known_colors)
-                else colors[i - len(known_colors)]
-            )
-
-            # Constraint: all agents have same action range and multiplier
-            # TODO: fact check this, I'm pretty sure they can have different ones BUT same across vectorized envs
-            agent = Agent(
-                name=f"agent_{i}",
-                collide=self.collisions,
-                color=color,
-                shape=Sphere(radius=self.agent_radius),
-                render_action=True,
-                u_range=100, # this is urange for VMAS, not for the RL agent
-                u_multiplier=1,
-                # dynamics=WaypointTracker(world),
-                sensors=[
-                    Lidar(
-                        world,
+        self.agent_list = []
+        for robot in self.robots:
+            agent_id = robot['id']
+            agent_dynamics = robot['dynamics']
+            sensors=[Lidar(world,
                         n_rays=12,
                         max_range=self.lidar_range,
-                        entity_filter=entity_filter_agents,
+                        entity_filter=entity_filter_agents)]
+            
+            color = motion_model_colors_hsl[agent_dynamics]
+
+            if agent_dynamics == 'holonomic':
+                agent = Agent(
+                    name=f"agent_{agent_id}_holo",
+                    collide=True,
+                    color=color,
+                    shape=Sphere(0.1),
+                    render_action=True,
+                    u_range=[1, 1],
+                    u_multiplier=[1, 0.001],
+                    dynamics=Holonomic(),
+                    sensors=sensors,
+                )
+                
+            elif agent_dynamics == 'differential':
+                agent = Agent(
+                    name=f"agent_{agent_id}_diff",
+                    collide=True,
+                    color=color,
+                    shape=Sphere(0.1),
+                    render_action=True,
+                    u_range=[1, 1],
+                    u_multiplier=[1, 0.001],
+                    dynamics=DiffDrive(world, integration="rk4"),
+                    sensors=sensors,
+                )
+            elif agent_dynamics == 'bicycle':
+                width, l_f, l_r = 0.1, 0.1, 0.1
+                max_steering_angle = torch.deg2rad(torch.tensor(30.0))
+                agent = Agent(
+                    name=f"agent_{agent_id}_bicycle",
+                    shape=Box(length=l_f + l_r, width=width),
+                    collide=True,
+                    color=color,
+                    render_action=True,
+                    u_range=[1, 1],
+                    u_multiplier=[1, max_steering_angle],
+                    dynamics=KinematicBicycle(
+                        world,
+                        width=width,
+                        l_f=l_f,
+                        l_r=l_r,
+                        max_steering_angle=max_steering_angle,
+                        integration="euler",  # one of "euler", "rk4"
                     ),
-                ]
-                if self.collisions
-                else None,
-            )
+                    sensors=sensors,
+                )
+            else:
+                raise ValueError(f"Undefined agent dynamics {agent_dynamics}")
+
             agent.pos_rew = torch.zeros(batch_dim, device=device)
             agent.agent_collision_rew = agent.pos_rew.clone()
 
@@ -114,16 +170,17 @@ class Scenario(BaseScenario):
                 agent, world, controller_params, "standard"
             )
 
-            world.add_agent(agent)
-
             # Add goals
             goal = Landmark(
-                name=f"goal {i}",
+                name=f"goal_{agent_id}",
                 collide=False,
                 color=color,
             )
+
             world.add_landmark(goal)
             agent.goal = goal
+            world.add_agent(agent)
+            self.agent_list.append(agent)
 
         self.pos_rew = torch.zeros(batch_dim, device=device)
         self.final_rew = self.pos_rew.clone()
@@ -158,7 +215,7 @@ class Scenario(BaseScenario):
             )
             goal_poses.append(position.squeeze(1))
             occupied_positions = torch.cat([occupied_positions, position], dim=1)
-
+        # print(self.world.agents)
         for i, agent in enumerate(self.world.agents):
             if self.split_goals:
                 goal_index = int(i // self.agents_with_same_goal)
@@ -256,7 +313,7 @@ class Scenario(BaseScenario):
                     agent.state.pos - agent.goal.state.pos,
                     dim=-1,
                 )
-                < agent.shape.radius
+                < (agent.shape.radius if isinstance(agent.shape, Sphere) else agent.shape.width)
                 for agent in self.world.agents
             ],
             dim=-1,
@@ -296,6 +353,40 @@ class Scenario(BaseScenario):
 
         return geoms
 
+class HeuristicPolicy(BaseHeuristicPolicy):
+    def compute_action(self, observation: torch.Tensor, u_range: float) -> torch.Tensor:
+        assert self.continuous_actions
+
+        current_pos = observation[:, :2]
+        current_vel = observation[:, 2:4]
+        # NOTE: this assumes agents can only observe own goal (observe_all_goals = False)
+        dir_from_goal = observation[:, 4:6]
+        # this is a weird output, it's not the raw LIDAR but rather
+        # LIDAR max_range - LIDAR measurement * n_lidar_rays
+        lidar = observation[:, 6:]
+
+        # move towards goal (w/out considering obstacles) 
+        action_dir = -dir_from_goal
+
+        # however, if any obstacles in visibility range, move directly away
+        # from them, instead of towards goal
+        # TODO: implement? performance is pretty good for this env though
+        # visible_objects = torch.any(lidar > 0.0)
+        # if visible_objects:
+        #     # TODO: instead of finding max dist, should find min of > 0.0
+        #     _, object_dir_index = torch.max(lidar, dim=1)
+        #     angle_to_obj = object_dir_index / lidar.shape[1] * 2 * torch.pi
+        #     dir_to_obj = [torch.cos(angle_to_obj), torch.sin(angle_to_obj)]
+        #     towards_obj_dir = torch.stack(dir_to_obj, dim=1)
+        #     action_dir = -0.01 * towards_obj_dir
+
+        action = torch.clamp(
+            action_dir,
+            min=-u_range,
+            max=u_range,
+        )
+
+        return action
 
 class HeuristicPolicy(BaseHeuristicPolicy):
     def __init__(self, clf_epsilon = 0.2, clf_slack = 100.0, *args, **kwargs):
