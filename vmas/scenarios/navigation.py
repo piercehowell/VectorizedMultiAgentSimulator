@@ -245,7 +245,10 @@ class Scenario(BaseScenario):
                 [agent.sensors[0]._max_range - agent.sensors[0].measure()]
                 if self.collisions
                 else []
-            ),
+            )
+            + [
+                torch.tensor([agent.shape.radius], device=agent.device).view(-1, 1)
+            ],
             dim=-1,
         )
 
