@@ -247,7 +247,7 @@ class Scenario(BaseScenario):
                 else []
             )
             + [
-                torch.tensor([agent.shape.radius], device=agent.device).view(-1, 1)
+                torch.tensor([agent.shape.radius], device=agent.device).repeat(agent.state.pos.shape[0], 1)
             ],
             dim=-1,
         )
