@@ -103,7 +103,7 @@ class Scenario(BaseScenario):
         
         # Add agents
         self.agent_list = []
-        for robot in self.robots:
+        for i, robot in enumerate(self.robots):
             agent_id = robot['id']
             agent_dynamics = robot['dynamics']
             sensors=[Lidar(world,
@@ -115,7 +115,7 @@ class Scenario(BaseScenario):
 
             if agent_dynamics == 'holonomic':
                 agent = Agent(
-                    name=f"agent_{agent_id}_holo",
+                    name=f"agent_holo-{agent_id}",
                     collide=True,
                     color=color,
                     shape=Sphere(0.1),
@@ -128,7 +128,7 @@ class Scenario(BaseScenario):
                 
             elif agent_dynamics == 'differential':
                 agent = Agent(
-                    name=f"agent_{agent_id}_diff",
+                    name=f"agent_diff-{agent_id}",
                     collide=True,
                     color=color,
                     shape=Sphere(0.1),
@@ -142,7 +142,7 @@ class Scenario(BaseScenario):
                 width, l_f, l_r = 0.1, 0.1, 0.1
                 max_steering_angle = torch.deg2rad(torch.tensor(30.0))
                 agent = Agent(
-                    name=f"agent_{agent_id}_bicycle",
+                    name=f"agent_bicycle-{agent_id}",
                     shape=Box(length=l_f + l_r, width=width),
                     collide=True,
                     color=color,
@@ -295,6 +295,7 @@ class Scenario(BaseScenario):
         return torch.cat(
             [
                 agent.state.pos,
+                agent.state.rot,
                 agent.state.vel,
             ]
             + goal_poses
