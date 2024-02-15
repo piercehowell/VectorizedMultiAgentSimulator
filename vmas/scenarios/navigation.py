@@ -125,6 +125,12 @@ class Scenario(BaseScenario):
                     dynamics=Holonomic(),
                     sensors=sensors,
                 )
+                # Holonomic dynamics by default have actions
+                # as force
+                controller_params = [0.2, 0.6, 0.0002]
+                agent.controller = VelocityController(
+                agent, world, controller_params, "standard"
+            )
                 
             elif agent_dynamics == 'differential':
                 agent = Agent(
@@ -139,8 +145,9 @@ class Scenario(BaseScenario):
                     sensors=sensors,
                 )
             elif agent_dynamics == 'bicycle':
-                width, l_f, l_r = 0.1, 0.1, 0.1
-                max_steering_angle = torch.deg2rad(torch.tensor(30.0))
+                # width, l_f, l_r = 0.1, 0.1, 0.1
+                width, l_f, l_r = robot.get('width'), robot.get('l_f'), robot.get('l_r')
+                max_steering_angle = torch.deg2rad(torch.tensor(40.0))
                 agent = Agent(
                     name=f"agent_bicycle-{agent_id}",
                     shape=Box(length=l_f + l_r, width=width),
@@ -165,10 +172,6 @@ class Scenario(BaseScenario):
             agent.pos_rew = torch.zeros(batch_dim, device=device)
             agent.agent_collision_rew = agent.pos_rew.clone()
 
-            controller_params = [0.2, 0.6, 0.0002]
-            agent.controller = VelocityController(
-                agent, world, controller_params, "standard"
-            )
 
             # Add goals
             goal = Landmark(
