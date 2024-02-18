@@ -7,21 +7,33 @@ from typing import Dict, Callable, List
 import torch
 from torch import Tensor
 
+import numpy as np
+
 from vmas import render_interactively
-from vmas.simulator.core import Agent, Landmark, World, Sphere, Entity
+
+from vmas.simulator.core import Agent, Landmark, World, Sphere, Box, Entity
 from vmas.simulator.heuristic_policy import BaseHeuristicPolicy
 from vmas.simulator.scenario import BaseScenario
 from vmas.simulator.sensors import Lidar
-from vmas.simulator.utils import Color, ScenarioUtils
+from vmas.simulator.utils import Color, ScenarioUtils, X, Y
+from vmas.simulator.dynamics.waypoint_tracker import WaypointTracker
+from vmas.simulator.controllers.velocity_controller import VelocityController
+from vmas.simulator.dynamics.diff_drive import DiffDrive
+from vmas.simulator.dynamics.holonomic import Holonomic
+from vmas.simulator.dynamics.kinematic_bicycle import KinematicBicycle
+from copy import deepcopy
+
 
 if typing.TYPE_CHECKING:
     from vmas.simulator.rendering import Geom
 
+DYNAMIC_MODELS = {'holonomic': Holonomic, 
+                  'differential': DiffDrive,
+                  'bicycle': KinematicBicycle}
 
 class Scenario(BaseScenario):
     def make_world(self, batch_dim: int, device: torch.device, **kwargs):
         self.plot_grid = False
-        self.n_agents = kwargs.get("n_agents", 4)
         self.collisions = kwargs.get("collisions", True)
 
         self.agents_with_same_goal = kwargs.get("agents_with_same_goal", 1)
@@ -42,6 +54,22 @@ class Scenario(BaseScenario):
         self.world_semidim = 1
         self.min_collision_distance = 0.005
 
+        # Build all of the agents from a 'robots' file. Each robot shall have
+        # an ID (binary), a motion model, maximum speed (dynamics profile), and a 
+        # geometry profile. The function should receive the robots file as a dictionary
+        self.n_agents = kwargs.get("n_agents", 3)
+        self.robots_file = kwargs.get("robots",
+                                # default 3 agents
+                                 {'name': 'robots_0', # name of the robots file/pool
+                                  'robots':
+                                      # list of robots in the robot pool
+                                      [ 
+                                          {'id': "001", 'dynamics': 'bicycle'},
+                                          {'id': "010", 'dynamics': 'differential'},
+                                          {'id': "100", 'dynamics': 'holonomic'}
+                                      ]
+                                  })
+
         assert 1 <= self.agents_with_same_goal <= self.n_agents
         if self.agents_with_same_goal > 1:
             assert (
@@ -59,58 +87,103 @@ class Scenario(BaseScenario):
         # Make world
         world = World(batch_dim, device, substeps=2)
 
-        known_colors = [
-            (0.22, 0.49, 0.72),
-            (1.00, 0.50, 0),
-            (0.30, 0.69, 0.29),
-            (0.97, 0.51, 0.75),
-            (0.60, 0.31, 0.64),
-            (0.89, 0.10, 0.11),
-            (0.87, 0.87, 0),
-        ]
-        colors = torch.randn(
-            (max(self.n_agents - len(known_colors), 0), 3), device=device
-        )
         entity_filter_agents: Callable[[Entity], bool] = lambda e: isinstance(e, Agent)
 
+        # Set color to be based on kinematic model
+        #   red = holonomic
+        #   green = differential
+        #   blue = bicycle.
+        motion_model_colors_hsl = {
+            'holonomic': [1,0,0],
+            'differential': [0,1,0],
+            'bicycle': [0,0,1]
+        }
+        # Unpack the robot pool
+        self.robots = self.robots_file['robots'] # list of dictionaries
+        
         # Add agents
-        for i in range(self.n_agents):
-            color = (
-                known_colors[i]
-                if i < len(known_colors)
-                else colors[i - len(known_colors)]
-            )
-
-            # Constraint: all agents have same action range and multiplier
-            agent = Agent(
-                name=f"agent_{i}",
-                collide=self.collisions,
-                color=color,
-                shape=Sphere(radius=self.agent_radius),
-                render_action=True,
-                sensors=[
-                    Lidar(
-                        world,
+        self.agent_list = []
+        for i, robot in enumerate(self.robots):
+            agent_id = robot['id']
+            agent_dynamics = robot['dynamics']
+            sensors=[Lidar(world,
                         n_rays=12,
                         max_range=self.lidar_range,
-                        entity_filter=entity_filter_agents,
-                    ),
-                ]
-                if self.collisions
-                else None,
+                        entity_filter=entity_filter_agents)]
+            
+            color = motion_model_colors_hsl[agent_dynamics]
+
+            if agent_dynamics == 'holonomic':
+                agent = Agent(
+                    name=f"agent_holo-{agent_id}",
+                    collide=True,
+                    color=color,
+                    shape=Sphere(0.1),
+                    render_action=True,
+                    u_range=[1, 1],
+                    u_multiplier=[1, 0.001],
+                    dynamics=Holonomic(),
+                    sensors=sensors,
+                )
+                # Holonomic dynamics by default have actions
+                # as force
+                controller_params = [0.2, 0.6, 0.0002]
+                agent.controller = VelocityController(
+                agent, world, controller_params, "standard"
             )
+                
+            elif agent_dynamics == 'differential':
+                agent = Agent(
+                    name=f"agent_diff-{agent_id}",
+                    collide=True,
+                    color=color,
+                    shape=Sphere(0.1),
+                    render_action=True,
+                    u_range=[1, 1],
+                    u_multiplier=[1, 0.001],
+                    dynamics=DiffDrive(world, integration="rk4"),
+                    sensors=sensors,
+                )
+            elif agent_dynamics == 'bicycle':
+                # width, l_f, l_r = 0.1, 0.1, 0.1
+                width, l_f, l_r = robot.get('width'), robot.get('l_f'), robot.get('l_r')
+                max_steering_angle = torch.deg2rad(torch.tensor(40.0))
+                agent = Agent(
+                    name=f"agent_bicycle-{agent_id}",
+                    shape=Box(length=l_f + l_r, width=width),
+                    collide=True,
+                    color=color,
+                    render_action=True,
+                    u_range=[1, 1],
+                    u_multiplier=[1, max_steering_angle],
+                    dynamics=KinematicBicycle(
+                        world,
+                        width=width,
+                        l_f=l_f,
+                        l_r=l_r,
+                        max_steering_angle=max_steering_angle,
+                        integration="euler",  # one of "euler", "rk4"
+                    ),
+                    sensors=sensors,
+                )
+            else:
+                raise ValueError(f"Undefined agent dynamics {agent_dynamics}")
+
             agent.pos_rew = torch.zeros(batch_dim, device=device)
             agent.agent_collision_rew = agent.pos_rew.clone()
-            world.add_agent(agent)
+
 
             # Add goals
             goal = Landmark(
-                name=f"goal {i}",
+                name=f"goal_{agent_id}",
                 collide=False,
                 color=color,
             )
+
             world.add_landmark(goal)
             agent.goal = goal
+            world.add_agent(agent)
+            self.agent_list.append(agent)
 
         self.pos_rew = torch.zeros(batch_dim, device=device)
         self.final_rew = self.pos_rew.clone()
@@ -145,7 +218,7 @@ class Scenario(BaseScenario):
             )
             goal_poses.append(position.squeeze(1))
             occupied_positions = torch.cat([occupied_positions, position], dim=1)
-
+        # print(self.world.agents)
         for i, agent in enumerate(self.world.agents):
             if self.split_goals:
                 goal_index = int(i // self.agents_with_same_goal)
@@ -225,6 +298,7 @@ class Scenario(BaseScenario):
         return torch.cat(
             [
                 agent.state.pos,
+                agent.state.rot,
                 agent.state.vel,
             ]
             + goal_poses
@@ -243,7 +317,7 @@ class Scenario(BaseScenario):
                     agent.state.pos - agent.goal.state.pos,
                     dim=-1,
                 )
-                < agent.shape.radius
+                < (agent.shape.radius if isinstance(agent.shape, Sphere) else agent.shape.width)
                 for agent in self.world.agents
             ],
             dim=-1,
@@ -317,6 +391,99 @@ class HeuristicPolicy(BaseHeuristicPolicy):
         )
 
         return action
+
+class HeuristicPolicy(BaseHeuristicPolicy):
+    def __init__(self, clf_epsilon = 0.2, clf_slack = 100.0, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.clf_epsilon = clf_epsilon  # Exponential CLF convergence rate
+        self.clf_slack = clf_slack  # weights on CLF-QP slack variable
+
+    def compute_action(self, observation: Tensor, u_range: Tensor) -> Tensor:
+        """
+        QP inputs:
+        These values need to computed apriri based on observation before passing into QP
+
+        V: Lyapunov function value
+        lfV: Lie derivative of Lyapunov function
+        lgV: Lie derivative of Lyapunov function
+        CLF_slack: CLF constraint slack variable
+
+        QP outputs:
+        u: action
+        CLF_slack: CLF constraint slack variable, 0 if CLF constraint is satisfied
+        """
+        # Install it with: pip install cvxpylayers
+        import cvxpy as cp
+        from cvxpylayers.torch import CvxpyLayer
+
+        self.n_env = observation.shape[0]
+        self.device = observation.device
+        agent_pos = observation[:, :2]
+        agent_vel = observation[:, 2:4]
+        goal_pos = (-1.0) * (observation[:, 4:6] - agent_pos)
+
+        # Pre-compute tensors for the CLF and CBF constraints,
+        # Lyapunov Function from: https://arxiv.org/pdf/1903.03692.pdf
+
+        # Laypunov function
+        V_value = (
+            (agent_pos[:, X] - goal_pos[:, X]) ** 2
+            + 0.5 * (agent_pos[:, X] - goal_pos[:, X]) * agent_vel[:, X]
+            + agent_vel[:, X] ** 2
+            + (agent_pos[:, Y] - goal_pos[:, Y]) ** 2
+            + 0.5 * (agent_pos[:, Y] - goal_pos[:, Y]) * agent_vel[:, Y]
+            + agent_vel[:, Y] ** 2
+        )
+
+        LfV_val = (2 * (agent_pos[:, X] - goal_pos[:, X]) + agent_vel[:, X]) * (
+            agent_vel[:, X]
+        ) + (2 * (agent_pos[:, Y] - goal_pos[:, Y]) + agent_vel[:, Y]) * (
+            agent_vel[:, Y]
+        )
+        LgV_vals = torch.stack(
+            [
+                0.5 * (agent_pos[:, X] - goal_pos[:, X]) + 2 * agent_vel[:, X],
+                0.5 * (agent_pos[:, Y] - goal_pos[:, Y]) + 2 * agent_vel[:, Y],
+            ],
+            dim=1,
+        )
+        # Define Quadratic Program (QP) based controller
+        u = cp.Variable(2)
+        V_param = cp.Parameter(1)  # Lyapunov Function: V(x): x -> R, dim: (1,1)
+        lfV_param = cp.Parameter(1)
+        lgV_params = cp.Parameter(
+            2
+        )  # Lie derivative of Lyapunov Function, dim: (1, action_dim)
+        clf_slack = cp.Variable(1)  # CLF constraint slack variable, dim: (1,1)
+
+        constraints = []
+
+        # QP Cost F = u^T @ u + clf_slack**2
+        qp_objective = cp.Minimize(cp.sum_squares(u) + self.clf_slack * clf_slack**2)
+
+        # control bounds between u_range
+        constraints += [u <= u_range]
+        constraints += [u >= -u_range]
+        # CLF constraint
+        constraints += [
+            lfV_param + lgV_params @ u + self.clf_epsilon * V_param + clf_slack <= 0
+        ]
+
+        QP_problem = cp.Problem(qp_objective, constraints)
+
+        # Initialize CVXPY layers
+        QP_controller = CvxpyLayer(
+            QP_problem, parameters=[V_param, lfV_param, lgV_params], variables=[u]
+        )
+
+        # Solve QP
+        CVXpylayer_parameters = [V_value.unsqueeze(1), LfV_val.unsqueeze(1), LgV_vals]
+        action = QP_controller(*CVXpylayer_parameters, solver_args={"max_iters": 500})[
+            0
+        ]
+
+        return action
+
 
 if __name__ == "__main__":
     render_interactively(
