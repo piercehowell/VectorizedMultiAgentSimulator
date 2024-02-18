@@ -289,7 +289,7 @@ class EntityState(TorchVectorizedObject):
                 else:
                     attr[env_index] = 0.0
 
-    def _spawn(self, dim_c: int, dim_p: int, dim_capability: int):
+    def _spawn(self, dim_c: int, dim_p: int):
         self.pos = torch.zeros(
             self.batch_dim, dim_p, device=self.device, dtype=torch.float32
         )
@@ -381,7 +381,7 @@ class AgentState(EntityState):
         super()._reset(env_index)
 
     @override(EntityState)
-    def _spawn(self, dim_c: int, dim_p: int, dim_capability: int):
+    def _spawn(self, dim_c: int, dim_p: int):
         if dim_c > 0:
             self.c = torch.zeros(
                 self.batch_dim, dim_c, device=self.device, dtype=torch.float32
@@ -704,8 +704,8 @@ class Entity(TorchVectorizedObject, Observable, ABC):
     def collision_filter(self, collision_filter: Callable[[Entity], bool]):
         self._collision_filter = collision_filter
 
-    def _spawn(self, dim_c: int, dim_p: int, dim_capability: int = None):
-            self.state._spawn(dim_c, dim_p, dim_capability)
+    def _spawn(self, dim_c: int, dim_p: int):
+        self.state._spawn(dim_c, dim_p)
 
     def _reset(self, env_index: int):
         self.state._reset(env_index)
@@ -1014,7 +1014,7 @@ class Agent(Entity):
         self._action = action
         
     @override(Entity)
-    def _spawn(self, dim_c: int, dim_p: int, dim_capability: int = None):
+    def _spawn(self, dim_c: int, dim_p: int):
         if dim_c == 0:
             assert (
                 self.silent
@@ -1022,15 +1022,7 @@ class Agent(Entity):
         if self.silent:
             dim_c = 0
 
-        if dim_capability == 0:
-            assert(
-                not self.capability_aware
-            ), f"Agent {self.name} must have not have capabilities if dim_capability is set to 0"
-        
-        if(self.capability_aware):
-            dim_capability = 0
-        
-        super()._spawn(dim_c, dim_p, dim_capability)
+        super()._spawn(dim_c, dim_p)
 
     @override(Entity)
     def _reset(self, env_index: int):
@@ -1084,7 +1076,6 @@ class World(TorchVectorizedObject):
         x_semidim: float = None,
         y_semidim: float = None,
         dim_c: int = 0,
-        dim_capability: int = 0,
         collision_force: float = COLLISION_FORCE,
         joint_force: float = JOINT_FORCE,
         contact_margin: float = 1e-3,
@@ -1103,8 +1094,6 @@ class World(TorchVectorizedObject):
         self._dim_p = 2
         # communication channel dimensionality
         self._dim_c = dim_c
-        # agent capabilities
-        self._dim_capability = dim_capability
         # simulation timestep
         self._dt = dt
         self._substeps = substeps
@@ -1138,7 +1127,7 @@ class World(TorchVectorizedObject):
         """Only way to add agents to the world"""
         agent.batch_dim = self._batch_dim
         agent.to(self._device)
-        agent._spawn(dim_c=self._dim_c, dim_p=self.dim_p, dim_capability=self._dim_capability)
+        agent._spawn(dim_c=self._dim_c, dim_p=self.dim_p)
         self._agents.append(agent)
 
     def add_landmark(self, landmark: Landmark):
