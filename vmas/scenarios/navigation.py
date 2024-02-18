@@ -13,7 +13,6 @@ from vmas.simulator.heuristic_policy import BaseHeuristicPolicy
 from vmas.simulator.scenario import BaseScenario
 from vmas.simulator.sensors import Lidar
 from vmas.simulator.utils import Color, ScenarioUtils, X, Y
-from vmas.simulator.dynamics.waypoint_tracker import WaypointTracker
 from vmas.simulator.controllers.velocity_controller import VelocityController
 
 
@@ -94,7 +93,6 @@ class Scenario(BaseScenario):
                 render_action=True,
                 u_range=100, # this is urange for VMAS, not for the RL agent
                 u_multiplier=1,
-                # dynamics=WaypointTracker(world),
                 sensors=[
                     Lidar(
                         world,
