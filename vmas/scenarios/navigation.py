@@ -38,6 +38,7 @@ class Scenario(BaseScenario):
         self.shared_rew = kwargs.get("shared_rew", True)
         self.pos_shaping_factor = kwargs.get("pos_shaping_factor", 1)
         self.final_reward = kwargs.get("final_reward", 0.01)
+        self.makespan_shaping_factor = kwargs.get("makespan_shaping_factor", 0.1)
 
         self.agent_collision_penalty = kwargs.get("agent_collision_penalty", -1)
 
@@ -198,6 +199,11 @@ class Scenario(BaseScenario):
                 torch.stack([a.on_goal for a in self.world.agents], dim=-1), dim=-1
             )
 
+            self.goal_not_reached = torch.logical_not(torch.all(
+                torch.stack([a.on_goal for a in self.world.agents], dim=-1), dim=-1
+            ))
+
+            self.final_rew[self.goal_not_reached] += 1 * self.makespan_shaping_factor
             self.final_rew[self.all_goal_reached] = self.final_reward
 
             for i, a in enumerate(self.world.agents):
