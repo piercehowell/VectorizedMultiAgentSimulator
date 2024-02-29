@@ -14,6 +14,7 @@ from vmas.simulator.scenario import BaseScenario
 from vmas.simulator.sensors import Lidar
 from vmas.simulator.utils import Color, ScenarioUtils, X, Y
 from vmas.simulator.controllers.velocity_controller import VelocityController
+from vmas.simulator.dynamics.diff_drive import DiffDrive
 
 
 if typing.TYPE_CHECKING:
@@ -84,14 +85,14 @@ class Scenario(BaseScenario):
             )
 
             # Constraint: all agents have same action range and multiplier
-            # TODO: fact check this, I'm pretty sure they can have different ones BUT same across vectorized envs
+            # TODO(Kevin): fact check this, I'm pretty sure they can have different ones BUT same across vectorized envs
             agent = Agent(
                 name=f"agent_{i}",
                 collide=self.collisions,
                 color=color,
                 shape=Sphere(radius=self.agent_radius),
                 render_action=True,
-                u_range=100, # this is urange for VMAS, not for the RL agent
+                u_range=1.0, # this is urange for VMAS, not for the RL agent
                 u_multiplier=1,
                 sensors=[
                     Lidar(
@@ -103,6 +104,7 @@ class Scenario(BaseScenario):
                 ]
                 if self.collisions
                 else None,
+                dynamics=DiffDrive(world, integration="rk4"),
             )
             agent.pos_rew = torch.zeros(batch_dim, device=device)
             agent.agent_collision_rew = agent.pos_rew.clone()
