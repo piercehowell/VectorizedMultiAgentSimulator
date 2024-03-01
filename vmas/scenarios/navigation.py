@@ -104,7 +104,6 @@ class Scenario(BaseScenario):
                 ]
                 if self.collisions
                 else None,
-                dynamics=DiffDrive(world, integration="rk4"),
             )
             agent.pos_rew = torch.zeros(batch_dim, device=device)
             agent.agent_collision_rew = agent.pos_rew.clone()
