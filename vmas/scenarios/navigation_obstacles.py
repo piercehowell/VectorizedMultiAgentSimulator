@@ -49,8 +49,9 @@ class Scenario(BaseScenario):
 
         self.agent_agent_collision_penalty = kwargs.get("agent_agent_collision_penalty", -1)
         self.agent_obstacle_collision_penalty = kwargs.get("agent_obstacle_collision_penalty", -1)
+        self.entity_filter_agents: Callable[[Entity], bool] = lambda e: isinstance(e, Agent) or isinstance(e, Landmark) and e.collide
 
-        self.map_name = kwargs.get("map", "alcove")
+        self.map_name = kwargs.get("map", "het_passage")
         self.map, self.x_bounds, self.y_bounds, self.start_poses, self.goal_poses = self.parse_map(self.map_name)
         
         self.min_distance_between_entities = self.obstacle_dim + self.agent_radius + 0.05
@@ -73,7 +74,6 @@ class Scenario(BaseScenario):
         colors = torch.randn(
             (max(self.n_agents - len(known_colors), 0), 3), device=device
         )
-        entity_filter_agents: Callable[[Entity], bool] = lambda e: isinstance(e, Agent) or isinstance(e, Landmark) and e.collide
 
         # if running in alcove mode, ensure only 2 agents
         if self.map_name == "alcove":
@@ -99,7 +99,7 @@ class Scenario(BaseScenario):
                         world,
                         n_rays=12,
                         max_range=self.lidar_range,
-                        entity_filter=entity_filter_agents,
+                        entity_filter=self.entity_filter_agents,
                     ),
                 ]
                 if self.collisions
@@ -176,11 +176,43 @@ class Scenario(BaseScenario):
         """
         # TODO: Enable loading from specific teams
 
-        # capabilities [max velocity, agent radius]
-        for agent in self.world.agents:
-            agent_max_v = np.random.uniform(0.10, 1)
-            agent_radius = np.random.uniform(0.10, 0.50)
+        # # capabilities [max velocity, agent radius]
+        # for agent in self.world.agents:
+        #     agent_max_v = np.random.uniform(0.10, 1)
+        #     agent_radius = np.random.uniform(0.10, 0.50)
 
+        #     # set capability
+        #     agent.set_capability(
+        #         torch.tensor(
+        #             [agent_max_v, agent_radius],
+        #             dtype=torch.float32,
+        #             device=self.world.device
+        #         ),
+        #         batch_index=env_index,
+        #     )
+
+        #     # update action range
+        #     agent.action = Action(
+        #         u_range=agent_max_v,
+        #         u_multiplier = 1.0,
+        #         u_noise = None,
+        #         u_rot_range = 0.0,
+        #         u_rot_multiplier = 1.0,
+        #         u_rot_noise = None,
+        #     )
+
+        #     agent.action.to(self.world.device)  
+        #     agent.action.batch_dim = self.world.batch_dim      
+        #     agent.shape = Sphere(radius=agent_radius)
+
+        #################################################
+        #
+        # TODO: this is harcoded for experiments, remove
+        #
+        #################################################
+        agent_max_v = 1
+        agent_radius = 0.25
+        for agent in self.world.agents:
             # set capability
             agent.set_capability(
                 torch.tensor(
@@ -190,6 +222,8 @@ class Scenario(BaseScenario):
                 ),
                 batch_index=env_index,
             )
+
+            agent.sensors[0].max_range = agent_radius + 0.5
 
             # update action range
             agent.action = Action(
@@ -204,6 +238,8 @@ class Scenario(BaseScenario):
             agent.action.to(self.world.device)  
             agent.action.batch_dim = self.world.batch_dim      
             agent.shape = Sphere(radius=agent_radius)
+
+            agent_radius = 0.75
     
     def reset_world_at(self, env_index: int = None):
         # TODO [Shalin]: env_index is randomly not None during training, which breaks resetting
@@ -279,14 +315,30 @@ class Scenario(BaseScenario):
                 batch_index=env_index
             )
         else:
+            # # spawn agents randomly within map
+            # ScenarioUtils.spawn_entities_randomly(
+            #     self.world.agents,
+            #     self.world,
+            #     env_index,
+            #     self.min_distance_between_entities,
+            #     self.x_bounds,
+            #     self.y_bounds,
+            #     occupied_positions=occupied_obstacles
+            # )
+
+            ###########################################
+            #
+            # TODO: this is hardcoded for a specific experiment, remove
+            #
+            ###########################################
             # spawn agents randomly within map
             ScenarioUtils.spawn_entities_randomly(
                 self.world.agents,
                 self.world,
                 env_index,
                 self.min_distance_between_entities,
-                self.x_bounds,
-                self.y_bounds,
+                (self.x_bounds[0] + 1, self.x_bounds[1] - 1),
+                (self.y_bounds[1] / 2, self.y_bounds[1] - 1),
                 occupied_positions=occupied_obstacles
             )
 
@@ -319,15 +371,33 @@ class Scenario(BaseScenario):
             for i in range(self.n_agents):
                 goal_poses.append(self.world.agents[(i+1) % self.n_agents].state.pos)
         else:
-            # randomly generate goal poses
+            # # randomly generate goal poses
+            # for _ in self.world.agents:
+            #     position = ScenarioUtils.find_random_pos_for_entity(
+            #         occupied_positions=occupied_positions,
+            #         env_index=env_index,
+            #         world=self.world,
+            #         min_dist_between_entities=self.min_distance_between_entities,
+            #         x_bounds=self.x_bounds,
+            #         y_bounds=self.y_bounds,
+            #     )
+            #     goal_poses.append(position.squeeze(1))
+            #     occupied_positions = torch.cat([occupied_positions, position], dim=1)
+
+            ###########################################
+            #
+            # TODO: this is hardcoded for a specific experiment, remove
+            #
+            ###########################################
+            # spawn agents randomly within map
             for _ in self.world.agents:
                 position = ScenarioUtils.find_random_pos_for_entity(
-                    occupied_positions=occupied_positions,
-                    env_index=env_index,
                     world=self.world,
+                    env_index=env_index,
                     min_dist_between_entities=self.min_distance_between_entities,
-                    x_bounds=self.x_bounds,
-                    y_bounds=self.y_bounds,
+                    x_bounds=(self.x_bounds[0] + 1, self.x_bounds[1] - 1),
+                    y_bounds=(1, self.y_bounds[1]/2),
+                    occupied_positions=occupied_obstacles
                 )
                 goal_poses.append(position.squeeze(1))
                 occupied_positions = torch.cat([occupied_positions, position], dim=1)

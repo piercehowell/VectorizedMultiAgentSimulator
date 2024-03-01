@@ -69,6 +69,7 @@ class Lidar(Sensor):
         self._last_measurement = None
         self._entity_filter = entity_filter
         self._render_color = render_color
+        self._max_range = max_range
 
     def to(self, device: torch.device):
         self._angles = self._angles.to(device)
@@ -82,6 +83,14 @@ class Lidar(Sensor):
         self, entity_filter: Callable[[vmas.simulator.core.Entity], bool]
     ):
         self._entity_filter = entity_filter
+    
+    @property
+    def max_range(self):
+        return self._max_range
+    
+    @max_range.setter
+    def max_range(self, max_range: float):
+        self._max_range = max_range
 
     def measure(self):
         dists = []

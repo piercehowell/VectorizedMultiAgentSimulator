@@ -340,10 +340,10 @@ if __name__ == "__main__":
     # If you have more than 1 agent, you can control another one with W,A,S,D and Q,E for eventual rotational actions
     # and switch the agent with these controls using LSHIFT
 
-    scenario_name = "waterfall"
+    scenario_name = "navigation_obstacles"
 
     # Scenario specific variables
 
     render_interactively(
-        scenario_name, control_two_agents=True, save_render=False, display_info=True
+        scenario_name, control_two_agents=True, save_render=False, display_info=True, capability_aware=True
     )
