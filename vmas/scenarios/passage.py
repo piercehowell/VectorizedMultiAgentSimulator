@@ -25,6 +25,8 @@ class Scenario(BaseScenario):
         self.passage_width = 0.2
         self.passage_length = 0.103
         self.min_u = 0.5
+        self.collision_filter: Callable[[Entity], bool] = lambda e: isinstance(e, Agent) or isinstance(e, Landmark) and e.collide
+        self.capability_aware: bool = kwargs.get("capability_aware", False)
 
         # Make world
         world = World(batch_dim, device, x_semidim=1, y_semidim=1)
@@ -280,12 +282,15 @@ class Scenario(BaseScenario):
         for passage in passages:
             if not passage.collide:
                 passage_obs.append(passage.state.pos - agent.state.pos)
+        
         return torch.cat(
             [
                 agent.state.pos,
                 agent.state.vel,
                 agent.goal.state.pos - agent.state.pos,
                 *passage_obs,
+                torch.ones(*agent.state.pos.shape[:-1], 1, device=self.world.device) * agent.shape.radius
+                if self.capability_aware else [],
             ],
             dim=-1,
         )
