@@ -289,9 +289,10 @@ class Scenario(BaseScenario):
                 agent.state.vel,
                 agent.goal.state.pos - agent.state.pos,
                 *passage_obs,
+            ]
+            + [
                 torch.ones(*agent.state.pos.shape[:-1], 1, device=self.world.device) * agent.shape.radius
-                if self.capability_aware else [],
-            ],
+            ] if self.capability_aware else [],
             dim=-1,
         )
 
