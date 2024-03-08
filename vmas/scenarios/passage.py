@@ -40,7 +40,7 @@ class Scenario(BaseScenario):
                 agent = Agent(
                     name=f"agent_{i}", 
                     shape=Sphere(0.5 * self.agent_radius), 
-                    u_multiplier=2 * self.min_u,
+                    u_multiplier=self.min_u,
                 )
 
             world.add_agent(agent)
@@ -79,8 +79,8 @@ class Scenario(BaseScenario):
                 ).uniform_(
                     # -1 + (3 * self.agent_radius + self.agent_spacing),
                     # 1 - (3 * self.agent_radius + self.agent_spacing),
-                    (3 * self.agent_radius + self.agent_spacing),
-                    (3 * self.agent_radius + self.agent_spacing),
+                    -0.3 + (self.agent_radius + self.agent_spacing),
+                    -0.3 + (self.agent_radius + self.agent_spacing),
                 ),
                 torch.zeros(
                     (1, 1) if env_index is not None else (self.world.batch_dim, 1),
@@ -90,10 +90,8 @@ class Scenario(BaseScenario):
                     # -1 + (3 * self.agent_radius + self.agent_spacing),
                     # -(3 * self.agent_radius + self.agent_spacing)
                     # - self.passage_width / 2,
-                    -(3 * self.agent_radius + self.agent_spacing)
-                    - self.passage_width / 2,
-                    -(3 * self.agent_radius + self.agent_spacing)
-                    - self.passage_width / 2,
+                    -(self.agent_radius) - self.passage_width / 2 - 0.1,
+                    -(self.agent_radius) - self.passage_width / 2 - 0.1,
                 ),
             ],
             dim=1,
@@ -107,8 +105,8 @@ class Scenario(BaseScenario):
                 ).uniform_(
                     # -1 + (3 * self.agent_radius + self.agent_spacing),
                     # 1 - (3 * self.agent_radius + self.agent_spacing),
-                    (3 * self.agent_radius + self.agent_spacing),
-                    (3 * self.agent_radius + self.agent_spacing),
+                    -0.3 + (self.agent_radius + self.agent_spacing),
+                    -0.3 + (self.agent_radius + self.agent_spacing),
                 ),
                 torch.zeros(
                     (1, 1) if env_index is not None else (self.world.batch_dim, 1),
@@ -118,10 +116,8 @@ class Scenario(BaseScenario):
                     # (3 * self.agent_radius + self.agent_spacing)
                     # + self.passage_width / 2,
                     # 1 - (3 * self.agent_radius + self.agent_spacing),
-                    (3 * self.agent_radius + self.agent_spacing)
-                    + self.passage_width / 2,
-                    (3 * self.agent_radius + self.agent_spacing)
-                    + self.passage_width / 2,
+                    (self.agent_radius) + self.passage_width / 2 + 0.1,
+                    (self.agent_radius) + self.passage_width / 2 + 0.1,
                 ),
             ],
             dim=1,
@@ -143,14 +139,14 @@ class Scenario(BaseScenario):
                         [
                             [
                                 0.0
-                                if i % 2
+                                if not i % 2
                                 else (
                                     self.agent_spacing
                                     if i == 0
                                     else -self.agent_spacing
                                 ),
                                 0.0
-                                if not i % 2
+                                if i % 2
                                 else (
                                     self.agent_spacing
                                     if i == 1
@@ -175,14 +171,14 @@ class Scenario(BaseScenario):
                         [
                             [
                                 0.0
-                                if i % 2
+                                if not i % 2
                                 else (
                                     self.agent_spacing
                                     if i == 0
                                     else -self.agent_spacing
                                 ),
                                 0.0
-                                if not i % 2
+                                if i % 2
                                 else (
                                     self.agent_spacing
                                     if i == 1

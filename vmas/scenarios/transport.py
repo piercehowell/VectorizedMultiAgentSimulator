@@ -18,9 +18,10 @@ class Scenario(BaseScenario):
         self.package_width = kwargs.get("package_width", 0.15)
         self.package_length = kwargs.get("package_length", 0.15)
         self.package_mass = kwargs.get("package_mass", 50)
+        self.dist_to_pkg_shaping = kwargs.get("dist_to_pkg_shaping", 0.1)
 
         self.shaping_factor = 100
-        self.world_semidim = 1
+        self.world_semidim = 0.75 
         self.agent_radius = 0.03
 
         # Make world
@@ -54,7 +55,7 @@ class Scenario(BaseScenario):
                 name=f"package {i}",
                 collide=True,
                 movable=True,
-                mass=50,
+                mass=self.package_mass,
                 shape=Box(length=self.package_length, width=self.package_width),
                 color=Color.RED,
             )
@@ -125,8 +126,9 @@ class Scenario(BaseScenario):
                 )
 
     def reward(self, agent: Agent):
+        # reward for how close package is to goal
+        # (by default, agents are only rewarded in this way + reward is shared)
         is_first = agent == self.world.agents[0]
-
         if is_first:
             self.rew = torch.zeros(
                 self.world.batch_dim, device=self.world.device, dtype=torch.float32
@@ -150,6 +152,14 @@ class Scenario(BaseScenario):
                     - package_shaping[~package.on_goal]
                 )
                 package.global_shaping = package_shaping
+
+        # reward for how close agents are to package
+        for i, package in enumerate(self.packages):
+            dist_to_pkg = torch.linalg.vector_norm(agent.state.pos - package.state.pos, dim=-1)
+            # any small distance gets "floored"
+            # dist_to_pkg[dist_to_pkg < 0.1] = 0.1
+
+            self.rew += -dist_to_pkg * self.dist_to_pkg_shaping
 
         return self.rew
 
