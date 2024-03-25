@@ -233,8 +233,9 @@ class Scenario(BaseScenario):
         return torch.cat(
             [
                 agent.state.pos,
+                agent.state.rot,
                 agent.state.vel,
-                agent.state.pos,
+                # agent.state.pos,
                 lidar_1_measures,
                 # lidar_2_measures,
             ],
