@@ -226,6 +226,40 @@ class Scenario(BaseScenario):
             num_covered_targets_covered_by_agent * self.covering_rew_coeff
         )
         return agent.covering_reward
+    
+    def curiosity_state(self, agent: Agent):
+        """
+        Defines the curiosity state for the agent in the het-discovery environment.
+        """
+        # TODO: Potential states: 
+        # distance from targets, distance from agents, is-covering target
+        agent_index = self.world.agents.index(agent)
+
+        agents_pos = torch.stack(
+                [a.state.pos for a in self.world.agents], dim=1
+            )
+        targets_pos = torch.stack([t.state.pos for t in self._targets], dim=1)
+        agents_targets_dists = torch.cdist(agents_pos, targets_pos)
+        agents_agents_dists = torch.cdist(agents_pos, agents_pos)
+
+        # targets covered by the agent
+        targets_covered_by_agent = (
+            agents_targets_dists[:, agent_index] < self._covering_range
+        )
+
+
+        return torch.cat(
+            [
+                agent.state.pos,
+                agent.state.rot,
+                agent.state.vel,
+                agents_targets_dists[:, agent_index],
+                agents_agents_dists[:, agent_index],
+                targets_covered_by_agent
+            ],
+            dim=-1
+        )
+        
 
     def observation(self, agent: Agent):
         lidar_1_measures = agent.sensors[0].measure()
@@ -249,6 +283,7 @@ class Scenario(BaseScenario):
             else self.shared_covering_rew,
             "collision_rew": agent.collision_rew,
             "targets_covered": self.covered_targets.sum(-1),
+            "curiosity_state": self.curiosity_state(agent)
         }
         return info
 
