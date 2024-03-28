@@ -24,6 +24,8 @@ class Scenario(BaseScenario):
 
         self.world_semidim = 0.75 
         self.agent_radius = 0.03
+        self.default_agent_u = 0.6
+        self.default_agent_mass = 1.0
 
         # Make world
         world = World(
@@ -36,12 +38,29 @@ class Scenario(BaseScenario):
             + 2 * self.agent_radius
             + max(self.package_length, self.package_width),
         )
+
         # Add agents
         for i in range(n_agents):
-            agent = Agent(
-                name=f"agent_{i}", shape=Sphere(self.agent_radius), u_multiplier=0.6
-            )
+            agent = None
+            if i == 0:
+                agent = Agent(
+                    name=f"agent_{i}", 
+                    shape=Sphere(self.agent_radius),
+                    u_multiplier=self.default_agent_u,
+                    mass=self.default_agent_mass,
+                )
+            elif i == 1:
+                agent = Agent(
+                    name=f"agent_{i}", 
+                    shape=Sphere(0.5 * self.agent_radius),
+                    u_multiplier=2.0 * self.default_agent_u,
+                    # for now, let's pretend mass is inversely proportional to
+                    # speed (even though that's not at all true)
+                    mass=0.5 * self.default_agent_mass,
+                )
+
             world.add_agent(agent)
+
         # Add landmarks
         goal = Landmark(
             name="goal",
@@ -154,7 +173,7 @@ class Scenario(BaseScenario):
                 )
                 package.global_shaping = package_shaping
 
-        # reward for how close agents are to package
+        # reward for how close agents are to all packages
         for i, package in enumerate(self.packages):
             dist_to_pkg = torch.linalg.vector_norm(agent.state.pos - package.state.pos, dim=-1)
             # any small distance gets "floored"
