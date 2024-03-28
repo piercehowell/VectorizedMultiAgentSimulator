@@ -18,9 +18,9 @@ class Scenario(BaseScenario):
         self.package_width = kwargs.get("package_width", 0.15)
         self.package_length = kwargs.get("package_length", 0.15)
         self.package_mass = kwargs.get("package_mass", 50)
-        self.package_dist_rew_factor = kwargs.get("package_dist_rew_factor", 0.1)
+        self.dist_to_pkg_shaping = kwargs.get("dist_to_pkg_shaping", 0.1)
 
-        self.package_pushing_rew_factor = kwargs.get("package_pushing_rew_factor", 100)
+        self.shaping_factor = 100
         self.world_semidim = 0.75 
         self.agent_radius = 0.03
 
@@ -115,25 +115,19 @@ class Scenario(BaseScenario):
                     torch.linalg.vector_norm(
                         package.state.pos - package.goal.state.pos, dim=1
                     )
-                    * self.package_pushing_rew_factor
+                    * self.shaping_factor
                 )
-                # package.init_dist = torch.linalg.vector_norm(
-                #     package.state.pos - package.goal.state.pos, dim=1
-                # )
             else:
                 package.global_shaping[env_index] = (
                     torch.linalg.vector_norm(
                         package.state.pos[env_index] - package.goal.state.pos[env_index]
                     )
-                    * self.package_pushing_rew_factor
+                    * self.shaping_factor
                 )
-                # package.init_dist[env_index] = torch.linalg.vector_norm(
-                #     package.state.pos[env_index] - package.goal.state.pos[env_index]
-                # )
 
     def reward(self, agent: Agent):
-        # shared reward for how close package is to goal, summed across all packages
-        # (by default, agents are only rewarded in this way)
+        # reward for how close package is to goal
+        # (by default, agents are only rewarded in this way + reward is shared)
         is_first = agent == self.world.agents[0]
         if is_first:
             self.rew = torch.zeros(
@@ -152,13 +146,20 @@ class Scenario(BaseScenario):
                     Color.GREEN.value, device=self.world.device, dtype=torch.float32
                 )
 
-                # seems to be (init_dist - curr_dist) done weirdly
-                package_shaping = package.dist_to_goal * self.package_pushing_rew_factor
+                package_shaping = package.dist_to_goal * self.shaping_factor
                 self.rew[~package.on_goal] += (
                     package.global_shaping[~package.on_goal]
                     - package_shaping[~package.on_goal]
                 )
                 package.global_shaping = package_shaping
+
+        # reward for how close agents are to package
+        for i, package in enumerate(self.packages):
+            dist_to_pkg = torch.linalg.vector_norm(agent.state.pos - package.state.pos, dim=-1)
+            # any small distance gets "floored"
+            # dist_to_pkg[dist_to_pkg < 0.1] = 0.1
+
+            self.rew += -dist_to_pkg * self.dist_to_pkg_shaping
 
         return self.rew
 
