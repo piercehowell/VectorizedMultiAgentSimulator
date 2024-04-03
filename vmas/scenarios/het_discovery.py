@@ -243,19 +243,21 @@ class Scenario(BaseScenario):
         agents_agents_dists = torch.cdist(agents_pos, agents_pos)
 
         # targets covered by the agent
-        targets_covered_by_agent = (
+        num_targets_covered_by_agent = (
             agents_targets_dists[:, agent_index] < self._covering_range
-        )
+        ).sum(dim=1).unsqueeze(-1)
 
+        lidar_1_measures = agent.sensors[0].measure()
 
         return torch.cat(
             [
                 agent.state.pos,
                 agent.state.rot,
                 agent.state.vel,
-                agents_targets_dists[:, agent_index],
+                # agents_targets_dists[:, agent_index],
                 agents_agents_dists[:, agent_index],
-                targets_covered_by_agent
+                num_targets_covered_by_agent,
+                lidar_1_measures
             ],
             dim=-1
         )
