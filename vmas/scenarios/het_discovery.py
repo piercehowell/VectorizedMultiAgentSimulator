@@ -245,19 +245,21 @@ class Scenario(BaseScenario):
         # targets covered by the agent
         num_targets_covered_by_agent = (
             agents_targets_dists[:, agent_index] < self._covering_range
-        ).sum(dim=1).unsqueeze(-1)
+        ) #.sum(dim=1).unsqueeze(-1)
 
         lidar_1_measures = agent.sensors[0].measure()
 
+        # TODO: Try putting the locations of the targets
         return torch.cat(
             [
-                agent.state.pos,
-                agent.state.rot,
-                agent.state.vel,
-                # agents_targets_dists[:, agent_index],
-                agents_agents_dists[:, agent_index],
+                # agent.state.pos,
+                # agent.state.rot,
+                # agent.state.vel,
+                targets_pos.view(targets_pos.shape[0], -1),
+                torch.clamp(agents_targets_dists[:, agent_index], -5.0, 5.0),
+                torch.clamp(agents_agents_dists[:, agent_index], -5.0, 5.0),
                 num_targets_covered_by_agent,
-                lidar_1_measures
+                # lidar_1_measures
             ],
             dim=-1
         )
