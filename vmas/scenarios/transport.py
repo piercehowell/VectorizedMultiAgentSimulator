@@ -197,7 +197,11 @@ class Scenario(BaseScenario):
             dim=-1
         ) / len(self.packages)
 
-        return {"dist_to_goal": dist_to_goal, "dist_to_pkg": dist_to_pkg, "success_rate": success_rate}
+        # log a -1 if not terminal else 1
+        dones = self.done()
+        control = torch.where(dones==True, 1, -1)
+
+        return {"control": control, "dist_to_goal": dist_to_goal, "dist_to_pkg": dist_to_pkg, "success_rate": success_rate}
 
     def observation(self, agent: Agent):
         # get positions of all entities in this agent's reference frame
