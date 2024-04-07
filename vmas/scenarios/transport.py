@@ -2,6 +2,7 @@
 #  ProrokLab (https://www.proroklab.org/)
 #  All rights reserved.
 
+import random
 import torch
 
 from vmas import render_interactively
@@ -41,23 +42,12 @@ class Scenario(BaseScenario):
 
         # Add agents
         for i in range(n_agents):
-            agent = None
-            if i == 0:
-                agent = Agent(
-                    name=f"agent_{i}", 
-                    shape=Sphere(self.agent_radius),
-                    u_multiplier=self.default_agent_u,
-                    mass=self.default_agent_mass,
-                )
-            elif i == 1:
-                agent = Agent(
-                    name=f"agent_{i}", 
-                    shape=Sphere(0.5 * self.agent_radius),
-                    u_multiplier=2.0 * self.default_agent_u,
-                    # for now, let's pretend mass is inversely proportional to
-                    # speed (even though that's not at all true)
-                    mass=0.5 * self.default_agent_mass,
-                )
+            agent = Agent(
+                name=f"agent_{i}", 
+                shape=Sphere(self.agent_radius * random.uniform(0.5, 2)),
+                u_multiplier=self.default_agent_u * random.uniform(0.5, 2),
+                mass=self.default_agent_mass * random.uniform(0.5, 2),
+            )
 
             world.add_agent(agent)
 
@@ -182,6 +172,32 @@ class Scenario(BaseScenario):
             self.rew += -dist_to_pkg * self.agent_package_dist_reward_factor
 
         return self.rew
+    
+    def info(self, agent: Agent):
+        """
+        Log information about agent and scenario state.
+
+        :param agent: Agent batch to compute info of
+        :return: info: A dict with a key for each info of interest, and a tensor value  of shape (n_envs, info_size)
+        """
+        dist_to_pkg = torch.zeros(self.world.batch_dim, device=self.world.device)
+        dist_to_goal = torch.zeros(self.world.batch_dim, device=self.world.device)
+        goal = self.world.landmarks[0]
+        for i, package in enumerate(self.packages):
+            dist_to_goal += torch.linalg.vector_norm(
+                    package.state.pos - package.goal.state.pos, dim=1
+                ) - goal.shape.radius
+            dist_to_pkg += torch.linalg.vector_norm(agent.state.pos - package.state.pos, dim=-1) - agent.shape.radius
+
+        success_rate = torch.sum(
+            torch.stack(
+                [package.on_goal for package in self.packages],
+                dim=1,
+            ),
+            dim=-1
+        ) / len(self.packages)
+
+        return {"dist_to_goal": dist_to_goal, "dist_to_pkg": dist_to_pkg, "success_rate": success_rate}
 
     def observation(self, agent: Agent):
         # get positions of all entities in this agent's reference frame
@@ -197,6 +213,15 @@ class Scenario(BaseScenario):
                 agent.state.pos,
                 agent.state.vel,
                 *package_obs,
+                torch.tensor(
+                    agent.u_multiplier, device=self.world.device
+                ).repeat(self.world.batch_dim, 1),
+                torch.tensor(
+                    agent.shape.radius, device=self.world.device
+                ).repeat(self.world.batch_dim, 1),
+                torch.tensor(
+                    agent.mass, device=self.world.device
+                ).repeat(self.world.batch_dim, 1),
             ],
             dim=-1,
         )
