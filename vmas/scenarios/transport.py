@@ -180,6 +180,8 @@ class Scenario(BaseScenario):
         :param agent: Agent batch to compute info of
         :return: info: A dict with a key for each info of interest, and a tensor value  of shape (n_envs, info_size)
         """
+        # NOTE: we are assuming in logging that these metrics only matter at the ends of episodes
+        # can fix that either in logging or in here
         dist_to_pkg = torch.zeros(self.world.batch_dim, device=self.world.device)
         dist_to_goal = torch.zeros(self.world.batch_dim, device=self.world.device)
         goal = self.world.landmarks[0]
@@ -197,11 +199,7 @@ class Scenario(BaseScenario):
             dim=-1
         ) / len(self.packages)
 
-        # log a -1 if not terminal else 1
-        dones = self.done()
-        control = torch.where(dones==True, 1, -1)
-
-        return {"control": control, "dist_to_goal": dist_to_goal, "dist_to_pkg": dist_to_pkg, "success_rate": success_rate}
+        return {"dist_to_goal": dist_to_goal, "dist_to_pkg": dist_to_pkg, "success_rate": success_rate}
 
     def observation(self, agent: Agent):
         # get positions of all entities in this agent's reference frame
