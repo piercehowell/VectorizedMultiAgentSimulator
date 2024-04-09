@@ -22,6 +22,9 @@ class Scenario(BaseScenario):
 
         self.agent_package_dist_reward_factor = kwargs.get("agent_package_dist_reward_factor", 0.1)
         self.package_goal_dist_reward_factor = kwargs.get("package_goal_dist_reward_factor", 100)
+        self.capability_mult_range = kwargs.get("capability_mult_range", [0.5, 2])
+        self.capability_mult_min = self.capability_mult_range[0]
+        self.capability_mult_max = self.capability_mult_range[1]
 
         self.world_semidim = 0.75 
         self.agent_radius = 0.03
@@ -44,9 +47,9 @@ class Scenario(BaseScenario):
         for i in range(n_agents):
             agent = Agent(
                 name=f"agent_{i}", 
-                shape=Sphere(self.agent_radius * random.uniform(0.5, 2)),
-                u_multiplier=self.default_agent_u * random.uniform(0.5, 2),
-                mass=self.default_agent_mass * random.uniform(0.5, 2),
+                shape=Sphere(self.agent_radius * random.uniform(self.capability_mult_min, self.capability_mult_max)),
+                u_multiplier=self.default_agent_u * random.uniform(self.capability_mult_min, self.capability_mult_max),
+                mass=self.default_agent_mass * random.uniform(self.capability_mult_min, self.capability_mult_max),
             )
 
             world.add_agent(agent)
@@ -76,6 +79,11 @@ class Scenario(BaseScenario):
         return world
 
     def reset_world_at(self, env_index: int = None):
+        for agent in self.world.agents:
+            agent.shape=Sphere(self.agent_radius * random.uniform(self.capability_mult_min, self.capability_mult_max))
+            agent.u_multiplier=self.default_agent_u * random.uniform(self.capability_mult_min, self.capability_mult_max)
+            agent.mass=self.default_agent_mass * random.uniform(0.5, 2)
+
         # Random pos between -1 and 1
         ScenarioUtils.spawn_entities_randomly(
             self.world.agents,
