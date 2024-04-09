@@ -79,10 +79,12 @@ class Scenario(BaseScenario):
         return world
 
     def reset_world_at(self, env_index: int = None):
-        for agent in self.world.agents:
-            agent.shape=Sphere(self.agent_radius * random.uniform(self.capability_mult_min, self.capability_mult_max))
-            agent.u_multiplier=self.default_agent_u * random.uniform(self.capability_mult_min, self.capability_mult_max)
-            agent.mass=self.default_agent_mass * random.uniform(0.5, 2)
+        # only do this during batched resets!
+        if not env_index:        
+            for agent in self.world.agents:
+                agent.shape=Sphere(self.agent_radius * random.uniform(self.capability_mult_min, self.capability_mult_max))
+                agent.u_multiplier=self.default_agent_u * random.uniform(self.capability_mult_min, self.capability_mult_max)
+                agent.mass=self.default_agent_mass * random.uniform(self.capability_mult_min, self.capability_mult_max)
 
         # Random pos between -1 and 1
         ScenarioUtils.spawn_entities_randomly(
