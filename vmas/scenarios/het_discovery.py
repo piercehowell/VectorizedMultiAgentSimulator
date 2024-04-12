@@ -156,7 +156,7 @@ class Scenario(BaseScenario):
             self.shared_covering_rew[:] = 0
             for a in self.world.agents:
                 self.shared_covering_rew += self.agent_reward(a)
-            self.shared_covering_rew[self.shared_covering_rew != 0] /= 2
+            # self.shared_covering_rew[self.shared_covering_rew != 0] /= 2
 
         # Avoid collisions with each other
         agent.collision_rew[:] = 0
@@ -245,21 +245,21 @@ class Scenario(BaseScenario):
         # targets covered by the agent
         num_targets_covered_by_agent = (
             agents_targets_dists[:, agent_index] < self._covering_range
-        ) #.sum(dim=1).unsqueeze(-1)
+        ).sum(dim=1).unsqueeze(-1)
 
         lidar_1_measures = agent.sensors[0].measure()
 
         # TODO: Try putting the locations of the targets
         return torch.cat(
             [
-                # agent.state.pos,
+                # torch.clamp(agent.state.pos, -0.5, 0.5),
                 # agent.state.rot,
                 # agent.state.vel,
-                targets_pos.view(targets_pos.shape[0], -1),
-                torch.clamp(agents_targets_dists[:, agent_index], -5.0, 5.0),
-                torch.clamp(agents_agents_dists[:, agent_index], -5.0, 5.0),
+                # targets_pos.view(targets_pos.shape[0], -1),
+                # torch.clamp(agents_targets_dists[:, agent_index], 0, 0.5),
+                torch.clamp(agents_agents_dists[:, agent_index], 0, 0.5),
                 num_targets_covered_by_agent,
-                # lidar_1_measures
+                lidar_1_measures
             ],
             dim=-1
         )

@@ -10,6 +10,9 @@ from vmas.simulator.heuristic_policy import BaseHeuristicPolicy
 from vmas.simulator.scenario import BaseScenario
 from vmas.simulator.utils import Color, ScenarioUtils
 
+from typing import Dict, Callable, List
+from torch import Tensor
+
 
 class Scenario(BaseScenario):
     def make_world(self, batch_dim: int, device: torch.device, **kwargs):
@@ -17,9 +20,9 @@ class Scenario(BaseScenario):
         self.n_packages = kwargs.get("n_packages", 1)
         self.package_width = kwargs.get("package_width", 0.15)
         self.package_length = kwargs.get("package_length", 0.15)
-        self.package_mass = kwargs.get("package_mass", 50)
+        self.package_mass = kwargs.get("package_mass", 1)
 
-        self.shaping_factor = 100
+        self.shaping_factor = kwargs.get("shaping_factor", 100)
         self.world_semidim = 1
         self.agent_radius = 0.03
 
@@ -37,7 +40,7 @@ class Scenario(BaseScenario):
         # Add agents
         for i in range(n_agents):
             agent = Agent(
-                name=f"agent_{i}", shape=Sphere(self.agent_radius), u_multiplier=0.6
+                name=f"agent_{i}", shape=Sphere(self.agent_radius), u_multiplier=1.0
             )
             world.add_agent(agent)
         # Add landmarks
@@ -54,7 +57,7 @@ class Scenario(BaseScenario):
                 name=f"package {i}",
                 collide=True,
                 movable=True,
-                mass=50,
+                mass=self.package_mass,
                 shape=Box(length=self.package_length, width=self.package_width),
                 color=Color.RED,
             )
@@ -171,6 +174,28 @@ class Scenario(BaseScenario):
             dim=-1,
         )
 
+    def curiosity_state(self, agent: Agent):
+        """Curiosity state used for Random Netwok Distillation intrinsic
+        reward"""
+        package_obs = []
+        for package in self.packages:
+            package_dist_to_goal = torch.clamp(torch.cdist(package.state.pos, package.goal.state.pos), -0.5, 0.5)
+            package_dist_to_agent = torch.clamp(torch.cdist(package.state.pos, agent.state.pos), -0.5, 0.5)
+            package_vel = package.state.vel
+            package_obs += [
+                package_dist_to_goal,
+                package_dist_to_agent,
+                package_vel
+            ]
+        cs = torch.cat(
+            [
+                *package_obs
+            ],
+            dim=-1
+        )
+        # print("CS", cs)
+        return cs
+
     def done(self):
         return torch.all(
             torch.stack(
@@ -179,6 +204,12 @@ class Scenario(BaseScenario):
             ),
             dim=-1,
         )
+    
+    def info(self, agent: Agent) -> Dict[str, Tensor]:
+        info = {
+            "curiosity_state": self.curiosity_state(agent)
+        }
+        return info
 
 
 class HeuristicPolicy(BaseHeuristicPolicy):
