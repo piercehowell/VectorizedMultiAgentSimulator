@@ -179,12 +179,12 @@ class Scenario(BaseScenario):
         reward"""
         package_obs = []
         for package in self.packages:
-            package_dist_to_goal = torch.clamp(torch.cdist(package.state.pos, package.goal.state.pos), -0.5, 0.5)
-            package_dist_to_agent = torch.clamp(torch.cdist(package.state.pos, agent.state.pos), -0.5, 0.5)
+            package_dist_to_goal = torch.clamp(torch.cdist(package.state.pos, package.goal.state.pos), -1.0, 1.0)
+            package_dist_to_agent = torch.clamp(torch.cdist(package.state.pos, agent.state.pos), -0.25, 0.25)
             package_vel = package.state.vel
             package_obs += [
                 package_dist_to_goal,
-                package_dist_to_agent,
+                # package_dist_to_agent,
                 package_vel
             ]
         cs = torch.cat(
