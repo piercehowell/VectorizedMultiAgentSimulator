@@ -25,9 +25,10 @@ class Scenario(BaseScenario):
         self.capability_mult_range = kwargs.get("capability_mult_range", [0.5, 2])
         self.capability_mult_min = self.capability_mult_range[0]
         self.capability_mult_max = self.capability_mult_range[1]
+        self.relative_capabilities = kwargs.get("relative_capabilities", False)
 
         self.world_semidim = 0.75 
-        self.agent_radius = 0.03
+        self.default_agent_radius = 0.03
         self.default_agent_u = 0.6
         self.default_agent_mass = 1.0
 
@@ -36,23 +37,31 @@ class Scenario(BaseScenario):
             batch_dim,
             device,
             x_semidim=self.world_semidim
-            + 2 * self.agent_radius
+            + 2 * self.default_agent_radius
             + max(self.package_length, self.package_width),
             y_semidim=self.world_semidim
-            + 2 * self.agent_radius
+            + 2 * self.default_agent_radius
             + max(self.package_length, self.package_width),
         )
 
         # Add agents
+        capabilities = [] # save capabilities for relative capabilities later
         for i in range(n_agents):
+            u_mult = self.default_agent_u * random.uniform(self.capability_mult_min, self.capability_mult_max)
+            radius = self.default_agent_radius * random.uniform(self.capability_mult_min, self.capability_mult_max)
+            mass = self.default_agent_mass * random.uniform(self.capability_mult_min, self.capability_mult_max)
+
+            capabilities.append([u_mult, radius, mass])
+
             agent = Agent(
                 name=f"agent_{i}", 
-                shape=Sphere(self.agent_radius * random.uniform(self.capability_mult_min, self.capability_mult_max)),
-                u_multiplier=self.default_agent_u * random.uniform(self.capability_mult_min, self.capability_mult_max),
-                mass=self.default_agent_mass * random.uniform(self.capability_mult_min, self.capability_mult_max),
+                u_multiplier=u_mult,
+                shape=Sphere(radius),
+                mass=mass,
             )
 
             world.add_agent(agent)
+        self.capabilities = torch.tensor(capabilities)
 
         # Add landmarks
         goal = Landmark(
@@ -81,17 +90,26 @@ class Scenario(BaseScenario):
     def reset_world_at(self, env_index: int = None):
         # only do this during batched resets!
         if not env_index:        
+            capabilities = [] # save capabilities for relative capabilities later
             for agent in self.world.agents:
-                agent.shape=Sphere(self.agent_radius * random.uniform(self.capability_mult_min, self.capability_mult_max))
-                agent.u_multiplier=self.default_agent_u * random.uniform(self.capability_mult_min, self.capability_mult_max)
-                agent.mass=self.default_agent_mass * random.uniform(self.capability_mult_min, self.capability_mult_max)
+                u_mult = self.default_agent_u * random.uniform(self.capability_mult_min, self.capability_mult_max)
+                radius = self.default_agent_radius * random.uniform(self.capability_mult_min, self.capability_mult_max)
+                mass = self.default_agent_mass * random.uniform(self.capability_mult_min, self.capability_mult_max)
+
+                capabilities.append([u_mult, radius, mass])
+
+                agent.u_multiplier=u_mult
+                agent.shape=Sphere(radius)
+                agent.mass=mass
+
+            self.capabilities = torch.tensor(capabilities)
 
         # Random pos between -1 and 1
         ScenarioUtils.spawn_entities_randomly(
             self.world.agents,
             self.world,
             env_index,
-            min_dist_between_entities=self.agent_radius * 2,
+            min_dist_between_entities=self.default_agent_radius * 2,
             x_bounds=(
                 -self.world_semidim,
                 self.world_semidim,
@@ -220,19 +238,31 @@ class Scenario(BaseScenario):
             package_obs.append(package.state.vel)
             package_obs.append(package.on_goal.unsqueeze(-1))
 
+        if self.relative_capabilities:
+            # compute the mean capabilities across the team's agents
+            team_mean = list(torch.mean(self.capabilities, dim=0))
+            # then compute "relative capability" of this agent by subtracting the mean
+            u_mult = agent.u_multiplier - team_mean[0].item()
+            radius = agent.shape.radius - team_mean[1].item()
+            mass = agent.mass - team_mean[2].item()
+        else:
+            u_mult = agent.u_multiplier
+            radius = agent.shape.radius
+            mass = agent.mass
+
         return torch.cat(
             [
                 agent.state.pos,
                 agent.state.vel,
                 *package_obs,
                 torch.tensor(
-                    agent.u_multiplier, device=self.world.device
+                    u_mult, device=self.world.device
                 ).repeat(self.world.batch_dim, 1),
                 torch.tensor(
-                    agent.shape.radius, device=self.world.device
+                    radius, device=self.world.device
                 ).repeat(self.world.batch_dim, 1),
                 torch.tensor(
-                    agent.mass, device=self.world.device
+                    mass, device=self.world.device
                 ).repeat(self.world.batch_dim, 1),
             ],
             dim=-1,
