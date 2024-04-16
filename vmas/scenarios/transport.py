@@ -25,7 +25,6 @@ class Scenario(BaseScenario):
         self.package_mass = kwargs.get("package_mass", 50)
         
         self.sparse_reward_only = kwargs.get("sparse_reward_only", False)
-        self.shaping_factor = kwargs.get("shaping_factor", 100)
         self.agent_package_dist_reward_factor = kwargs.get("agent_package_dist_reward_factor", 0.1)
         self.package_goal_dist_reward_factor = kwargs.get("package_goal_dist_reward_factor", 100)
         self.capability_mult_range = kwargs.get("capability_mult_range", [0.5, 2])
