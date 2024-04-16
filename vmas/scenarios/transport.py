@@ -2,6 +2,7 @@
 #  ProrokLab (https://www.proroklab.org/)
 #  All rights reserved.
 
+import random
 import torch
 
 from vmas import render_interactively
@@ -19,9 +20,16 @@ class Scenario(BaseScenario):
         self.package_length = kwargs.get("package_length", 0.15)
         self.package_mass = kwargs.get("package_mass", 50)
 
-        self.shaping_factor = 100
-        self.world_semidim = 1
+        self.agent_package_dist_reward_factor = kwargs.get("agent_package_dist_reward_factor", 0.1)
+        self.package_goal_dist_reward_factor = kwargs.get("package_goal_dist_reward_factor", 100)
+        self.capability_mult_range = kwargs.get("capability_mult_range", [0.5, 2])
+        self.capability_mult_min = self.capability_mult_range[0]
+        self.capability_mult_max = self.capability_mult_range[1]
+
+        self.world_semidim = 0.75 
         self.agent_radius = 0.03
+        self.default_agent_u = 0.6
+        self.default_agent_mass = 1.0
 
         # Make world
         world = World(
@@ -34,12 +42,18 @@ class Scenario(BaseScenario):
             + 2 * self.agent_radius
             + max(self.package_length, self.package_width),
         )
+
         # Add agents
         for i in range(n_agents):
             agent = Agent(
-                name=f"agent_{i}", shape=Sphere(self.agent_radius), u_multiplier=0.6
+                name=f"agent_{i}", 
+                shape=Sphere(self.agent_radius * random.uniform(self.capability_mult_min, self.capability_mult_max)),
+                u_multiplier=self.default_agent_u * random.uniform(self.capability_mult_min, self.capability_mult_max),
+                mass=self.default_agent_mass * random.uniform(self.capability_mult_min, self.capability_mult_max),
             )
+
             world.add_agent(agent)
+
         # Add landmarks
         goal = Landmark(
             name="goal",
@@ -54,7 +68,7 @@ class Scenario(BaseScenario):
                 name=f"package {i}",
                 collide=True,
                 movable=True,
-                mass=50,
+                mass=self.package_mass,
                 shape=Box(length=self.package_length, width=self.package_width),
                 color=Color.RED,
             )
@@ -65,6 +79,13 @@ class Scenario(BaseScenario):
         return world
 
     def reset_world_at(self, env_index: int = None):
+        # only do this during batched resets!
+        if not env_index:        
+            for agent in self.world.agents:
+                agent.shape=Sphere(self.agent_radius * random.uniform(self.capability_mult_min, self.capability_mult_max))
+                agent.u_multiplier=self.default_agent_u * random.uniform(self.capability_mult_min, self.capability_mult_max)
+                agent.mass=self.default_agent_mass * random.uniform(self.capability_mult_min, self.capability_mult_max)
+
         # Random pos between -1 and 1
         ScenarioUtils.spawn_entities_randomly(
             self.world.agents,
@@ -114,19 +135,20 @@ class Scenario(BaseScenario):
                     torch.linalg.vector_norm(
                         package.state.pos - package.goal.state.pos, dim=1
                     )
-                    * self.shaping_factor
+                    * self.package_goal_dist_reward_factor
                 )
             else:
                 package.global_shaping[env_index] = (
                     torch.linalg.vector_norm(
                         package.state.pos[env_index] - package.goal.state.pos[env_index]
                     )
-                    * self.shaping_factor
+                    * self.package_goal_dist_reward_factor
                 )
 
     def reward(self, agent: Agent):
+        # reward for how close package is to goal
+        # (by default, agents are only rewarded in this way + reward is shared)
         is_first = agent == self.world.agents[0]
-
         if is_first:
             self.rew = torch.zeros(
                 self.world.batch_dim, device=self.world.device, dtype=torch.float32
@@ -144,14 +166,50 @@ class Scenario(BaseScenario):
                     Color.GREEN.value, device=self.world.device, dtype=torch.float32
                 )
 
-                package_shaping = package.dist_to_goal * self.shaping_factor
+                package_shaping = package.dist_to_goal * self.package_goal_dist_reward_factor
                 self.rew[~package.on_goal] += (
                     package.global_shaping[~package.on_goal]
                     - package_shaping[~package.on_goal]
                 )
                 package.global_shaping = package_shaping
 
+        # reward for how close agents are to all packages
+        for i, package in enumerate(self.packages):
+            dist_to_pkg = torch.linalg.vector_norm(agent.state.pos - package.state.pos, dim=-1)
+            # any small distance gets "floored"
+            # dist_to_pkg[dist_to_pkg < 0.1] = 0.1
+
+            self.rew += -dist_to_pkg * self.agent_package_dist_reward_factor
+
         return self.rew
+    
+    def info(self, agent: Agent):
+        """
+        Log information about agent and scenario state.
+
+        :param agent: Agent batch to compute info of
+        :return: info: A dict with a key for each info of interest, and a tensor value  of shape (n_envs, info_size)
+        """
+        # NOTE: we are assuming in logging that these metrics only matter at the ends of episodes
+        # can fix that either in logging or in here
+        dist_to_pkg = torch.zeros(self.world.batch_dim, device=self.world.device)
+        dist_to_goal = torch.zeros(self.world.batch_dim, device=self.world.device)
+        goal = self.world.landmarks[0]
+        for i, package in enumerate(self.packages):
+            dist_to_goal += torch.linalg.vector_norm(
+                    package.state.pos - package.goal.state.pos, dim=1
+                ) - goal.shape.radius
+            dist_to_pkg += torch.linalg.vector_norm(agent.state.pos - package.state.pos, dim=-1) - agent.shape.radius
+
+        success_rate = torch.sum(
+            torch.stack(
+                [package.on_goal for package in self.packages],
+                dim=1,
+            ),
+            dim=-1
+        ) / len(self.packages)
+
+        return {"dist_to_goal": dist_to_goal, "dist_to_pkg": dist_to_pkg, "success_rate": success_rate}
 
     def observation(self, agent: Agent):
         # get positions of all entities in this agent's reference frame
@@ -167,6 +225,15 @@ class Scenario(BaseScenario):
                 agent.state.pos,
                 agent.state.vel,
                 *package_obs,
+                torch.tensor(
+                    agent.u_multiplier, device=self.world.device
+                ).repeat(self.world.batch_dim, 1),
+                torch.tensor(
+                    agent.shape.radius, device=self.world.device
+                ).repeat(self.world.batch_dim, 1),
+                torch.tensor(
+                    agent.mass, device=self.world.device
+                ).repeat(self.world.batch_dim, 1),
             ],
             dim=-1,
         )
