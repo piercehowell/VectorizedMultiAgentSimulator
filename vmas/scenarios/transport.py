@@ -11,6 +11,9 @@ from vmas.simulator.heuristic_policy import BaseHeuristicPolicy
 from vmas.simulator.scenario import BaseScenario
 from vmas.simulator.utils import Color, ScenarioUtils
 
+from typing import Dict, Callable, List
+from torch import Tensor
+
 
 class Scenario(BaseScenario):
     def make_world(self, batch_dim: int, device: torch.device, **kwargs):
@@ -18,14 +21,16 @@ class Scenario(BaseScenario):
         self.n_packages = kwargs.get("n_packages", 1)
         self.package_width = kwargs.get("package_width", 0.15)
         self.package_length = kwargs.get("package_length", 0.15)
-        self.package_mass = kwargs.get("package_mass", 50)
 
+        self.package_mass = kwargs.get("package_mass", 50)
+        
+        self.add_dense_reward = kwargs.get("add_dense_reward", True)
         self.agent_package_dist_reward_factor = kwargs.get("agent_package_dist_reward_factor", 0.1)
         self.package_goal_dist_reward_factor = kwargs.get("package_goal_dist_reward_factor", 100)
+        self.package_on_goal_reward_factor = kwargs.get("package_on_goal_reward_factor", 1.0)
         self.capability_mult_range = kwargs.get("capability_mult_range", [0.5, 2])
         self.capability_mult_min = self.capability_mult_range[0]
         self.capability_mult_max = self.capability_mult_range[1]
-
         self.world_semidim = 0.75 
         self.agent_radius = 0.03
         self.default_agent_u = 0.6
@@ -166,20 +171,27 @@ class Scenario(BaseScenario):
                     Color.GREEN.value, device=self.world.device, dtype=torch.float32
                 )
 
-                package_shaping = package.dist_to_goal * self.package_goal_dist_reward_factor
-                self.rew[~package.on_goal] += (
-                    package.global_shaping[~package.on_goal]
-                    - package_shaping[~package.on_goal]
-                )
-                package.global_shaping = package_shaping
+                # dense reward
+                if self.add_dense_reward:
+                    package_shaping = package.dist_to_goal * self.package_goal_dist_reward_factor
+                    self.rew[~package.on_goal] += (
+                        package.global_shaping[~package.on_goal]
+                        - package_shaping[~package.on_goal]
+                        )
+                    package.global_shaping = package_shaping
+                
+                # positive reward when the agent achieves the goal
+                self.rew[package.on_goal] += 1.0
+                
 
         # reward for how close agents are to all packages
-        for i, package in enumerate(self.packages):
-            dist_to_pkg = torch.linalg.vector_norm(agent.state.pos - package.state.pos, dim=-1)
-            # any small distance gets "floored"
-            # dist_to_pkg[dist_to_pkg < 0.1] = 0.1
+        if self.add_dense_reward:
+            for i, package in enumerate(self.packages):
+                dist_to_pkg = torch.linalg.vector_norm(agent.state.pos - package.state.pos, dim=-1)
+                # any small distance gets "floored"
+                # dist_to_pkg[dist_to_pkg < 0.1] = 0.1
 
-            self.rew += -dist_to_pkg * self.agent_package_dist_reward_factor
+                self.rew += -dist_to_pkg * self.agent_package_dist_reward_factor
 
         return self.rew
     
@@ -209,7 +221,8 @@ class Scenario(BaseScenario):
             dim=-1
         ) / len(self.packages)
 
-        return {"dist_to_goal": dist_to_goal, "dist_to_pkg": dist_to_pkg, "success_rate": success_rate}
+        return {"dist_to_goal": dist_to_goal, "dist_to_pkg": dist_to_pkg, "success_rate": success_rate,
+            "curiosity_state": self.curiosity_state(agent)}
 
     def observation(self, agent: Agent):
         # get positions of all entities in this agent's reference frame
@@ -237,6 +250,28 @@ class Scenario(BaseScenario):
             ],
             dim=-1,
         )
+
+    def curiosity_state(self, agent: Agent):
+        """Curiosity state used for Random Netwok Distillation intrinsic
+        reward"""
+        package_obs = []
+        for package in self.packages:
+            package_dist_to_goal = torch.clamp(torch.cdist(package.state.pos, package.goal.state.pos), -0.25, 0.25)
+            package_dist_to_agent = torch.clamp(torch.cdist(package.state.pos, agent.state.pos), -0.25, 0.25)
+            package_vel = package.state.vel
+            package_obs += [
+                package_dist_to_goal,
+                package_dist_to_agent,
+                package_vel
+            ]
+        cs = torch.cat(
+            [
+                *package_obs
+            ],
+            dim=-1
+        )
+        # print("CS", cs)
+        return cs
 
     def done(self):
         return torch.all(
