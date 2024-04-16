@@ -221,7 +221,8 @@ class Scenario(BaseScenario):
             dim=-1
         ) / len(self.packages)
 
-        return {"dist_to_goal": dist_to_goal, "dist_to_pkg": dist_to_pkg, "success_rate": success_rate}
+        return {"dist_to_goal": dist_to_goal, "dist_to_pkg": dist_to_pkg, "success_rate": success_rate,
+            "curiosity_state": self.curiosity_state(agent)}
 
     def observation(self, agent: Agent):
         # get positions of all entities in this agent's reference frame
@@ -280,12 +281,6 @@ class Scenario(BaseScenario):
             ),
             dim=-1,
         )
-    
-    def info(self, agent: Agent) -> Dict[str, Tensor]:
-        info = {
-            "curiosity_state": self.curiosity_state(agent)
-        }
-        return info
 
 
 class HeuristicPolicy(BaseHeuristicPolicy):
