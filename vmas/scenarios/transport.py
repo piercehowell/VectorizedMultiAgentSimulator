@@ -20,8 +20,8 @@ class Scenario(BaseScenario):
         self.n_packages = kwargs.get("n_packages", 1)
         self.package_width = kwargs.get("package_width", 0.15)
         self.package_length = kwargs.get("package_length", 0.15)
-        self.package_mass = kwargs.get("package_mass", 1)
-
+        self.package_mass = kwargs.get("package_mass", 35)
+        self.sparse_reward_only = kwargs.get("sparse_reward_only", False)
         self.shaping_factor = kwargs.get("shaping_factor", 100)
         self.world_semidim = 1
         self.agent_radius = 0.03
@@ -148,11 +148,18 @@ class Scenario(BaseScenario):
                 )
 
                 package_shaping = package.dist_to_goal * self.shaping_factor
-                self.rew[~package.on_goal] += (
+
+                if not self.sparse_reward_only:
+                    self.rew[~package.on_goal] += (
                     package.global_shaping[~package.on_goal]
                     - package_shaping[~package.on_goal]
-                )
-                package.global_shaping = package_shaping
+                    )
+                    package.global_shaping = package_shaping
+                
+                # sparse reward. Only get rewarded for getting the package on goal.
+                else:
+                    self.rew[package.on_goal] += 1.0
+                
 
         return self.rew
 
@@ -179,12 +186,12 @@ class Scenario(BaseScenario):
         reward"""
         package_obs = []
         for package in self.packages:
-            package_dist_to_goal = torch.clamp(torch.cdist(package.state.pos, package.goal.state.pos), -1.0, 1.0)
+            package_dist_to_goal = torch.clamp(torch.cdist(package.state.pos, package.goal.state.pos), -0.25, 0.25)
             package_dist_to_agent = torch.clamp(torch.cdist(package.state.pos, agent.state.pos), -0.25, 0.25)
             package_vel = package.state.vel
             package_obs += [
                 package_dist_to_goal,
-                # package_dist_to_agent,
+                package_dist_to_agent,
                 package_vel
             ]
         cs = torch.cat(
