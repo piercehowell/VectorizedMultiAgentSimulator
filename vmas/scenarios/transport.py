@@ -15,13 +15,24 @@ from vmas.simulator.utils import Color, ScenarioUtils
 class Scenario(BaseScenario):
     def make_world(self, batch_dim: int, device: torch.device, **kwargs):
         n_agents = kwargs.get("n_agents", 4)
+
+        # packages
         self.n_packages = kwargs.get("n_packages", 1)
         self.package_width = kwargs.get("package_width", 0.15)
         self.package_length = kwargs.get("package_length", 0.15)
         self.package_mass = kwargs.get("package_mass", 50)
 
+        # realism
+        self.linear_friction = kwargs.get("linear_friction", 0.1)
+        self.angular_friction = kwargs.get("angular_friction", 0.1)
+        self.drag = kwargs.get("drag", 0.1)
+        # TODO: implement automated domain randomization here?
+
+        # rewards
         self.agent_package_dist_reward_factor = kwargs.get("agent_package_dist_reward_factor", 0.1)
         self.package_goal_dist_reward_factor = kwargs.get("package_goal_dist_reward_factor", 100)
+
+        # capabilities
         self.capability_mult_range = kwargs.get("capability_mult_range", [0.5, 2])
         self.capability_mult_min = self.capability_mult_range[0]
         self.capability_mult_max = self.capability_mult_range[1]
@@ -42,6 +53,9 @@ class Scenario(BaseScenario):
             y_semidim=self.world_semidim
             + 2 * self.default_agent_radius
             + max(self.package_length, self.package_width),
+            linear_friction=self.linear_friction,
+            angular_friction=self.angular_friction,
+            drag=self.drag,
         )
 
         # Add agents
@@ -77,6 +91,7 @@ class Scenario(BaseScenario):
                 name=f"package {i}",
                 collide=True,
                 movable=True,
+                rotatable=True,
                 mass=self.package_mass,
                 shape=Box(length=self.package_length, width=self.package_width),
                 color=Color.RED,
