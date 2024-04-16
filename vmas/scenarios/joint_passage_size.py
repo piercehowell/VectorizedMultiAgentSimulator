@@ -60,13 +60,13 @@ class Scenario(BaseScenario):
         self.mass_position = kwargs.get("mass_position", 0.75)
         self.max_speed_1 = kwargs.get("max_speed_1", None)  # 0.1
         self.pos_shaping_factor = kwargs.get("pos_shaping_factor", 1)
-        self.rot_shaping_factor = kwargs.get("rot_shaping_factor", 1)
-        self.collision_reward = kwargs.get("collision_reward", 0)
+        self.rot_shaping_factor = kwargs.get("rot_shaping_factor", 0)
+        self.collision_reward = kwargs.get("collision_reward", -0.1)
         self.energy_reward_coeff = kwargs.get("energy_reward_coeff", 0)
         self.obs_noise = kwargs.get("obs_noise", 0.0)
         self.n_passages = kwargs.get("n_passages", 3)
         self.middle_angle_180 = kwargs.get("middle_angle_180", False)
-        self.use_vel_controller = kwargs.get("use_vel_controller", False)
+        self.use_vel_controller = kwargs.get("use_vel_controller", True)
 
         assert self.n_passages == 3 or self.n_passages == 4
 

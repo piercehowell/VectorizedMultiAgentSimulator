@@ -12,26 +12,39 @@ from vmas.simulator.utils import Color
 
 class Scenario(BaseScenario):
     def make_world(self, batch_dim: int, device: torch.device, **kwargs):
-        self.n_passages = kwargs.get("n_passages", 1)
+        self.n_passages = 3 # kwargs.get("n_passages", 2)
         self.shared_reward = kwargs.get("shared_reward", False)
 
         assert self.n_passages >= 1 and self.n_passages <= 20
 
         self.shaping_factor = 100
 
-        self.n_agents = 5
-        self.agent_radius = 0.03333
-        self.agent_spacing = 0.1
+        self.n_agents = 2
+        self.agent_radius = 0.075
+        self.agent_spacing = self.agent_radius * 4
         self.passage_width = 0.2
         self.passage_length = 0.103
+        self.min_u = 0.5
+        self.collision_filter: Callable[[Entity], bool] = lambda e: isinstance(e, Agent) or isinstance(e, Landmark) and e.collide
+        self.capability_aware: bool = kwargs.get("capability_aware", False)
 
         # Make world
         world = World(batch_dim, device, x_semidim=1, y_semidim=1)
         # Add agents
         for i in range(self.n_agents):
-            agent = Agent(
-                name=f"agent_{i}", shape=Sphere(self.agent_radius), u_multiplier=0.7
-            )
+            if i == 0:
+                agent = Agent(
+                    name=f"agent_{i}", 
+                    shape=Sphere(self.agent_radius), 
+                    u_multiplier=self.min_u,
+                )
+            elif i == 1:
+                agent = Agent(
+                    name=f"agent_{i}", 
+                    shape=Sphere(0.5 * self.agent_radius), 
+                    u_multiplier=self.min_u,
+                )
+
             world.add_agent(agent)
             goal = Landmark(
                 name=f"goal {i}",
@@ -66,17 +79,21 @@ class Scenario(BaseScenario):
                     device=self.world.device,
                     dtype=torch.float32,
                 ).uniform_(
-                    -1 + (3 * self.agent_radius + self.agent_spacing),
-                    1 - (3 * self.agent_radius + self.agent_spacing),
+                    # -1 + (3 * self.agent_radius + self.agent_spacing),
+                    # 1 - (3 * self.agent_radius + self.agent_spacing),
+                    -0.3 + (self.agent_radius + self.agent_spacing),
+                    -0.3 + (self.agent_radius + self.agent_spacing),
                 ),
                 torch.zeros(
                     (1, 1) if env_index is not None else (self.world.batch_dim, 1),
                     device=self.world.device,
                     dtype=torch.float32,
                 ).uniform_(
-                    -1 + (3 * self.agent_radius + self.agent_spacing),
-                    -(3 * self.agent_radius + self.agent_spacing)
-                    - self.passage_width / 2,
+                    # -1 + (3 * self.agent_radius + self.agent_spacing),
+                    # -(3 * self.agent_radius + self.agent_spacing)
+                    # - self.passage_width / 2,
+                    -(self.agent_radius) - self.passage_width / 2 - 0.1,
+                    -(self.agent_radius) - self.passage_width / 2 - 0.1,
                 ),
             ],
             dim=1,
@@ -88,23 +105,27 @@ class Scenario(BaseScenario):
                     device=self.world.device,
                     dtype=torch.float32,
                 ).uniform_(
-                    -1 + (3 * self.agent_radius + self.agent_spacing),
-                    1 - (3 * self.agent_radius + self.agent_spacing),
+                    # -1 + (3 * self.agent_radius + self.agent_spacing),
+                    # 1 - (3 * self.agent_radius + self.agent_spacing),
+                    -0.3 + (self.agent_radius + self.agent_spacing),
+                    -0.3 + (self.agent_radius + self.agent_spacing),
                 ),
                 torch.zeros(
                     (1, 1) if env_index is not None else (self.world.batch_dim, 1),
                     device=self.world.device,
                     dtype=torch.float32,
                 ).uniform_(
-                    (3 * self.agent_radius + self.agent_spacing)
-                    + self.passage_width / 2,
-                    1 - (3 * self.agent_radius + self.agent_spacing),
+                    # (3 * self.agent_radius + self.agent_spacing)
+                    # + self.passage_width / 2,
+                    # 1 - (3 * self.agent_radius + self.agent_spacing),
+                    (self.agent_radius) + self.passage_width / 2 + 0.1,
+                    (self.agent_radius) + self.passage_width / 2 + 0.1,
                 ),
             ],
             dim=1,
         )
 
-        order = torch.randperm(self.n_agents).tolist()
+        order = sorted(torch.randperm(self.n_agents).tolist())
         agents = [self.world.agents[i] for i in order]
         goals = [self.world.landmarks[i] for i in order]
         for i, goal in enumerate(goals):
@@ -120,14 +141,14 @@ class Scenario(BaseScenario):
                         [
                             [
                                 0.0
-                                if i % 2
+                                if not i % 2
                                 else (
                                     self.agent_spacing
                                     if i == 0
                                     else -self.agent_spacing
                                 ),
                                 0.0
-                                if not i % 2
+                                if i % 2
                                 else (
                                     self.agent_spacing
                                     if i == 1
@@ -152,14 +173,14 @@ class Scenario(BaseScenario):
                         [
                             [
                                 0.0
-                                if i % 2
+                                if not i % 2
                                 else (
                                     self.agent_spacing
                                     if i == 0
                                     else -self.agent_spacing
                                 ),
                                 0.0
-                                if not i % 2
+                                if i % 2
                                 else (
                                     self.agent_spacing
                                     if i == 1
@@ -186,7 +207,15 @@ class Scenario(BaseScenario):
                     * self.shaping_factor
                 )
 
-        order = torch.randperm(len(self.world.landmarks[self.n_agents :])).tolist()
+        # order = torch.randperm(len(self.world.landmarks[self.n_agents :])).tolist()
+        order = [i for i in range(len(self.world.landmarks[self.n_agents :]))]
+
+        # the holes are controlled by position of the first self.n_passages indices
+        # so move those to specified places
+        order[order.index(0)], order[9] = order[9], 0
+        order[order.index(1)], order[15] = order[15], 1
+        order[order.index(2)], order[16] = order[16], 2
+
         passages = [self.world.landmarks[self.n_agents :][i] for i in order]
         for i, passage in enumerate(passages):
             if not passage.collide:
@@ -249,13 +278,17 @@ class Scenario(BaseScenario):
         for passage in passages:
             if not passage.collide:
                 passage_obs.append(passage.state.pos - agent.state.pos)
+        
         return torch.cat(
             [
                 agent.state.pos,
                 agent.state.vel,
                 agent.goal.state.pos - agent.state.pos,
                 *passage_obs,
-            ],
+            ]
+            + [
+                torch.ones(*agent.state.pos.shape[:-1], 1, device=self.world.device) * agent.shape.radius
+            ] if self.capability_aware else [],
             dim=-1,
         )
 

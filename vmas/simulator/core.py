@@ -476,6 +476,10 @@ class Action(TorchVectorizedObject):
     def u_multiplier(self):
         return self._u_multiplier
 
+    @u_multiplier.setter
+    def u_multiplier(self, u_multiplier: float):
+        self._u_multiplier = u_multiplier
+
     @property
     def u_noise(self):
         return self._u_noise
@@ -1012,6 +1016,10 @@ class Agent(Entity):
     @action.setter
     def action(self, action: Action):
         self._action = action
+    
+    @u_multiplier.setter
+    def u_multiplier(self, u_multiplier: float):
+        self._action.u_multiplier = u_multiplier
         
     @override(Entity)
     def _spawn(self, dim_c: int, dim_p: int):

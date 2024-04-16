@@ -27,7 +27,7 @@ if typing.TYPE_CHECKING:
 
 class Scenario(BaseScenario):
     def make_world(self, batch_dim: int, device: torch.device, **kwargs):
-        self.device = device
+        self.device = "cuda:0" # device
         self.plot_grid = False
         self.n_agents = kwargs.get("n_agents", 2)
         self.collisions = kwargs.get("collisions", True)
@@ -48,7 +48,7 @@ class Scenario(BaseScenario):
         self.agent_agent_collision_penalty = kwargs.get("agent_agent_collision_penalty", -1)
         self.agent_obstacle_collision_penalty = kwargs.get("agent_obstacle_collision_penalty", -1)
 
-        self.map_name = kwargs.get("map", "swap")
+        self.map_name = kwargs.get("map", "grid_map")
         self.map, self.x_bounds, self.y_bounds, self.start_poses, self.goal_poses = self.parse_map(self.map_name)
         
         self.min_distance_between_entities = self.obstacle_dim + self.agent_radius + 0.05
@@ -92,6 +92,7 @@ class Scenario(BaseScenario):
                 color=color,
                 shape=Sphere(radius=self.agent_radius),
                 render_action=True,
+                u_multiplier=(i+1), # 1.0 or 2.0
                 sensors=[
                     Lidar(
                         world,
@@ -136,6 +137,18 @@ class Scenario(BaseScenario):
         return world 
     
     def parse_map(self, map_name: str):
+        return (torch.tensor([[1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 1, 1, 1, 1, 0, 0, 1],
+        [1, 0, 0, 1, 1, 1, 1, 0, 0, 1],
+        [1, 0, 0, 1, 1, 1, 1, 0, 0, 1],
+        [1, 0, 0, 1, 1, 1, 1, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1]], device='cuda:0', dtype=torch.int32), (0, 10), (0, 10), [[1.5, 2.5], [1.5, 1.5]], [[1.5, 6.5], [1.5, 7.5]])
+
+
         # Load in map xml
         f = os.path.dirname(__file__)
         map = ET.parse(f'{f}/../../maps/{map_name}.xml')
@@ -165,6 +178,7 @@ class Scenario(BaseScenario):
             row_data = row_element.text.split()
             for j, value in enumerate(row_data):
                 grid[height - 1 - i, j] = int(value)
+
         return grid, (0, width), (0, height), start_poses, goal_poses
     
     def reset_world_at(self, env_index: int = None):
