@@ -24,9 +24,10 @@ class Scenario(BaseScenario):
 
         self.package_mass = kwargs.get("package_mass", 50)
         
-        self.sparse_reward_only = kwargs.get("sparse_reward_only", False)
+        self.add_dense_reward = kwargs.get("add_dense_reward", True)
         self.agent_package_dist_reward_factor = kwargs.get("agent_package_dist_reward_factor", 0.1)
         self.package_goal_dist_reward_factor = kwargs.get("package_goal_dist_reward_factor", 100)
+        self.package_on_goal_reward_factor = kwargs.get("package_on_goal_reward_factor", 1.0)
         self.capability_mult_range = kwargs.get("capability_mult_range", [0.5, 2])
         self.capability_mult_min = self.capability_mult_range[0]
         self.capability_mult_max = self.capability_mult_range[1]
@@ -171,7 +172,7 @@ class Scenario(BaseScenario):
                 )
 
                 # dense reward
-                if not self.sparse_reward_only:
+                if self.add_dense_reward:
                     package_shaping = package.dist_to_goal * self.package_goal_dist_reward_factor
                     self.rew[~package.on_goal] += (
                         package.global_shaping[~package.on_goal]
@@ -179,13 +180,12 @@ class Scenario(BaseScenario):
                         )
                     package.global_shaping = package_shaping
                 
-                # sparse reward. Only get rewarded for getting the package on goal.
-                else:
-                    self.rew[package.on_goal] += 1.0
+                # positive reward when the agent achieves the goal
+                self.rew[package.on_goal] += 1.0
                 
 
         # reward for how close agents are to all packages
-        if not self.sparse_reward_only:
+        if self.add_dense_reward:
             for i, package in enumerate(self.packages):
                 dist_to_pkg = torch.linalg.vector_norm(agent.state.pos - package.state.pos, dim=-1)
                 # any small distance gets "floored"
