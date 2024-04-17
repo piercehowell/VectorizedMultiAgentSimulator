@@ -31,6 +31,8 @@ class Scenario(BaseScenario):
         # rewards
         self.agent_package_dist_reward_factor = kwargs.get("agent_package_dist_reward_factor", 0.1)
         self.package_goal_dist_reward_factor = kwargs.get("package_goal_dist_reward_factor", 100)
+        self.interagent_collision_penalty = kwargs.get("interagent_collision_penalty", -1)
+        assert self.interagent_collision_penalty < 0, f"self.interagent_collision_penalty must be < 0, current value is {self.interagent_collision_penalty}!"
 
         # capabilities
         self.capability_mult_range = kwargs.get("capability_mult_range", [0.5, 2])
@@ -38,10 +40,12 @@ class Scenario(BaseScenario):
         self.capability_mult_max = self.capability_mult_range[1]
         self.capability_representation = kwargs.get("capability_representation", "raw")
 
+        # general world settings
         self.world_semidim = 0.75 
         self.default_agent_radius = 0.03
         self.default_agent_u = 0.6
         self.default_agent_mass = 1.0
+        self.min_collision_distance = 0.05 * self.default_agent_radius # default navigation collision dist is 5% of the agent radius
 
         # Make world
         world = World(
@@ -73,8 +77,17 @@ class Scenario(BaseScenario):
                 shape=Sphere(radius),
                 mass=mass,
             )
+            agent.agent_collision_rew = torch.zeros(batch_dim, device=device)
+
+            # TODO: add VelocityController!
+            # TODO: diff drive?
+            # controller_params = [0.2, 0.6, 0.0002]
+            # agent.controller = VelocityController(
+            #     agent, world, controller_params, "standard"
+            # )
 
             world.add_agent(agent)
+
         self.capabilities = torch.tensor(capabilities)
 
         # Add landmarks
@@ -179,14 +192,15 @@ class Scenario(BaseScenario):
                 )
 
     def reward(self, agent: Agent):
-        # reward for how close package is to goal
-        # (by default, agents are only rewarded in this way + reward is shared)
+        # rewards under is_first only need to be applied once
         is_first = agent == self.world.agents[0]
         if is_first:
             self.rew = torch.zeros(
                 self.world.batch_dim, device=self.world.device, dtype=torch.float32
             )
 
+            # reward for how close package is to goal
+            # (shared across team)
             for i, package in enumerate(self.packages):
                 package.dist_to_goal = torch.linalg.vector_norm(
                     package.state.pos - package.goal.state.pos, dim=1
@@ -206,6 +220,23 @@ class Scenario(BaseScenario):
                 )
                 package.global_shaping = package_shaping
 
+            # penalty (negative rew) for agent-agent collisions
+            for a in self.world.agents:
+                a.agent_collision_rew[:] = 0
+
+            for i, a in enumerate(self.world.agents):
+                for j, b in enumerate(self.world.agents):
+                    if i <= j:
+                        continue
+                    if self.world.collides(a, b):
+                        distance = self.world.get_distance(a, b)
+                        a.agent_collision_rew[
+                            distance <= self.min_collision_distance
+                        ] += self.interagent_collision_penalty
+                        b.agent_collision_rew[
+                            distance <= self.min_collision_distance
+                        ] += self.interagent_collision_penalty
+
         # reward for how close agents are to all packages
         for i, package in enumerate(self.packages):
             dist_to_pkg = torch.linalg.vector_norm(agent.state.pos - package.state.pos, dim=-1)
@@ -214,7 +245,7 @@ class Scenario(BaseScenario):
 
             self.rew += -dist_to_pkg * self.agent_package_dist_reward_factor
 
-        return self.rew
+        return self.rew + agent.agent_collision_rew
     
     def info(self, agent: Agent):
         """
@@ -242,7 +273,11 @@ class Scenario(BaseScenario):
             dim=-1
         ) / len(self.packages)
 
-        return {"dist_to_goal": dist_to_goal, "dist_to_pkg": dist_to_pkg, "success_rate": success_rate}
+        # TODO: double-check that agent_collision_rew works across all agents (and we're not just logging 1 agent's penalties)
+        return {"dist_to_goal": dist_to_goal, "dist_to_pkg":
+                dist_to_pkg, "success_rate": success_rate,
+                "agent_collision_rew": agent.agent_collision_rew,
+                }
 
     def observation(self, agent: Agent):
         # get positions of all entities in this agent's reference frame
