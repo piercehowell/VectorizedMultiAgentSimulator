@@ -139,11 +139,11 @@ class Scenario(BaseScenario):
         )
         
         self.package_starting_dists = []
-        self.package_starting_positions = []
+        self.og_package_positions = []
         for i, package in enumerate(self.packages):
             package.on_goal = self.world.is_overlapping(package, package.goal)
             
-            self.package_starting_positions.append(package.state.pos)
+            self.og_package_positions.append(package.state.pos)
             self.package_starting_dists.append(
                 torch.cdist(package.state.pos, package.goal.state.pos)
             )
@@ -234,8 +234,7 @@ class Scenario(BaseScenario):
             dim=-1
         ) / len(self.packages)
 
-        return {"dist_to_goal": dist_to_goal, "dist_to_pkg": dist_to_pkg, "success_rate": success_rate,
-            "curiosity_state": self.curiosity_state(agent)}
+        return {"dist_to_goal": dist_to_goal, "dist_to_pkg": dist_to_pkg, "success_rate": success_rate}
     
     def partial_observation(self, agent: Agent):
         """
@@ -243,13 +242,13 @@ class Scenario(BaseScenario):
         """
          # get positions of all entities in this agent's reference frame
         package_obs = []
-        out_of_obs_val = -100.0 # default value used for out-of-observation data in the observation vector
+        out_of_obs_val = -0.0001 # default value used for out-of-observation data in the observation vector
         for i, package in enumerate(self.packages):
             # box starting position and goal position alway part of the observation
-            package_obs.append(self.package_starting_positions[i])
+            package_obs.append(self.og_package_positions[i])
             package_obs.append(package.on_goal.unsqueeze(-1))
             
-            mask = (torch.cdist(package.state.pos, agent.state.pos) < self.package_observation_radius).view(-1,)
+            mask = (torch.linalg.vector_norm(package.state.pos - agent.state.pos, dim=-1) < self.package_observation_radius)
             pkg_state_vec = package.state.pos.clone()
             pkg_vel_vec = package.state.vel.clone()
             pkg_dist_to_goal_vec = package.state.pos - package.goal.state.pos
