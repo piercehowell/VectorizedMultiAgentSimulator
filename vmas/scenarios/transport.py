@@ -145,7 +145,7 @@ class Scenario(BaseScenario):
             
             self.og_package_positions.append(package.state.pos)
             self.package_starting_dists.append(
-                torch.cdist(package.state.pos, package.goal.state.pos)
+                torch.linalg.vector_norm(package.state.pos - package.goal.state.pos, dim=1)
             )
 
             if env_index is None:
@@ -234,7 +234,8 @@ class Scenario(BaseScenario):
             dim=-1
         ) / len(self.packages)
 
-        return {"dist_to_goal": dist_to_goal, "dist_to_pkg": dist_to_pkg, "success_rate": success_rate}
+        return {"dist_to_goal": dist_to_goal, "dist_to_pkg": dist_to_pkg, "success_rate": success_rate,
+                "curiosity_state": self.curiosity_state(agent)}
     
     def partial_observation(self, agent: Agent):
         """
@@ -325,15 +326,14 @@ class Scenario(BaseScenario):
             package_dist_from_goal_at_start = self.package_starting_dists[i]
 
             # normalized
-            package_dist_to_goal = torch.cdist(package.state.pos, package.goal.state.pos) / (package_dist_from_goal_at_start + 1e-6)
+            package_dist_to_goal = torch.linalg.vector_norm(package.state.pos - package.goal.state.pos, dim=1) / (package_dist_from_goal_at_start + 1e-6)
             package_dist_to_goal = torch.clamp(package_dist_to_goal, -1e-6, 1.1)
-            package_dist_to_agent = torch.clamp(torch.cdist(package.state.pos, agent.state.pos), 0.0, 1.0) * 0.1
+            package_dist_to_agent = torch.clamp(torch.linalg.vector_norm(package.state.pos - agent.state.pos, dim=1), 0.0, 1.0) * 0.001
             package_vel = package.state.vel
             package_obs += [
-                package_dist_to_goal,
-                # package_dist_to_agent,
+                package_dist_to_goal.unsqueeze(-1),
+                package_dist_to_agent.unsqueeze(-1),
                 package_vel,
-                package_vel**2
             ]
         cs = torch.cat(
             [
