@@ -136,30 +136,18 @@ class Scenario(BaseScenario):
 
             self.capabilities = torch.tensor(capabilities)
 
-        # Random pos between -1 and 1
-        ScenarioUtils.spawn_entities_randomly(
-            self.world.agents,
-            self.world,
-            env_index,
-            min_dist_between_entities=self.default_agent_radius * 2,
-            x_bounds=(
-                -self.world_semidim,
-                self.world_semidim,
-            ),
-            y_bounds=(
-                -self.world_semidim,
-                self.world_semidim,
-            ),
-        )
-        agent_occupied_positions = torch.stack(
-            [agent.state.pos for agent in self.world.agents], dim=1
+        # spawn goal at origin
+        goal = self.world.landmarks[0]
+        goal.state.pos = torch.zeros(goal.state.pos.shape, device=self.world.device)
+        goal_occupied_pos = torch.stack(
+            [goal.state.pos], dim=1
         )
         if env_index is not None:
-            agent_occupied_positions = agent_occupied_positions[env_index].unsqueeze(0)
+            goal_occupied_pos = goal_occupied_pos[env_index].unsqueeze(0)
 
-        goal = self.world.landmarks[0]
+        # then spawn packages randomly around it
         ScenarioUtils.spawn_entities_randomly(
-            [goal] + self.packages,
+            self.packages,
             self.world,
             env_index,
             min_dist_between_entities=max(
@@ -174,7 +162,30 @@ class Scenario(BaseScenario):
                 -self.world_semidim,
                 self.world_semidim,
             ),
-            occupied_positions=agent_occupied_positions,
+            occupied_positions=goal_occupied_pos,
+        )
+
+        package_occupied_pos = torch.stack(
+            [package.state.pos for package in self.packages], dim=1
+        )
+        if env_index is not None:
+            package_occupied_pos = package_occupied_pos[env_index].unsqueeze(0)
+
+        # then spawn agents randomly around packages
+        ScenarioUtils.spawn_entities_randomly(
+            self.world.agents,
+            self.world,
+            env_index,
+            min_dist_between_entities=self.packages[0].shape.circumscribed_radius() + goal.shape.radius + 0.01,
+            x_bounds=(
+                -self.world_semidim,
+                self.world_semidim,
+            ),
+            y_bounds=(
+                -self.world_semidim,
+                self.world_semidim,
+            ),
+            occupied_positions=package_occupied_pos,
         )
 
         for i, package in enumerate(self.packages):
