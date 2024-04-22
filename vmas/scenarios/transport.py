@@ -10,6 +10,7 @@ from vmas.simulator.core import Agent, Box, Landmark, Sphere, World
 from vmas.simulator.heuristic_policy import BaseHeuristicPolicy
 from vmas.simulator.scenario import BaseScenario
 from vmas.simulator.utils import Color, ScenarioUtils
+from vmas.simulator.dynamics.diff_drive import DiffDrive
 
 
 class Scenario(BaseScenario):
@@ -26,13 +27,15 @@ class Scenario(BaseScenario):
         self.linear_friction = kwargs.get("linear_friction", 0.1)
         self.angular_friction = kwargs.get("angular_friction", 0.1)
         self.drag = kwargs.get("drag", 0.1)
+        self.max_linear_vel = kwargs.get("max_linear_vel", 0.5)
+        self.max_angular_vel = kwargs.get("max_angular_vel", 0.5)
         # TODO: implement automated domain randomization here?
 
         # rewards
         self.agent_package_dist_reward_factor = kwargs.get("agent_package_dist_reward_factor", 0.1)
         self.package_goal_dist_reward_factor = kwargs.get("package_goal_dist_reward_factor", 100)
         self.interagent_collision_penalty = kwargs.get("interagent_collision_penalty", -1)
-        assert self.interagent_collision_penalty < 0, f"self.interagent_collision_penalty must be < 0, current value is {self.interagent_collision_penalty}!"
+        assert self.interagent_collision_penalty <= 0, f"self.interagent_collision_penalty must be <= 0, current value is {self.interagent_collision_penalty}!"
 
         # capabilities
         self.capability_mult_range = kwargs.get("capability_mult_range", [0.5, 2])
@@ -41,10 +44,12 @@ class Scenario(BaseScenario):
         self.capability_representation = kwargs.get("capability_representation", "raw")
 
         # general world settings
-        self.world_semidim = 0.75 
-        self.default_agent_radius = 0.03
-        self.default_agent_u = 0.6
-        self.default_agent_mass = 1.0
+        # TODO: scale the env/box to match turtlebot / real box?
+        # TODO: put some of these into YAML
+        self.world_semidim = kwargs.get("world_semidim", 0.3)
+        self.default_agent_radius = kwargs.get("default_agent_radius", 0.17)
+        self.default_agent_u = 1.0
+        self.default_agent_mass = kwargs.get("default_agent_mass", 5.0)
         self.min_collision_distance = 0.05 * self.default_agent_radius # default navigation collision dist is 5% of the agent radius
 
         # Make world
@@ -65,27 +70,26 @@ class Scenario(BaseScenario):
         # Add agents
         capabilities = [] # save capabilities for relative capabilities later
         for i in range(n_agents):
+            # TODO: rename u_mult to speed_multiplier
             u_mult = self.default_agent_u * random.uniform(self.capability_mult_min, self.capability_mult_max)
             radius = self.default_agent_radius * random.uniform(self.capability_mult_min, self.capability_mult_max)
             mass = self.default_agent_mass * random.uniform(self.capability_mult_min, self.capability_mult_max)
 
             capabilities.append([u_mult, radius, mass])
 
+            # NOTE: DiffDrive assumes actions are linear/angular velocity
             agent = Agent(
                 name=f"agent_{i}", 
-                u_multiplier=u_mult,
+                # NOTE: assume range output by actor is -1 to +1, and scale it up/down before processing action
+                # (VMAS doesn't handle u_multiplier correctly when DiffDrive is on, modified manually)
+                u_range=[1, 1],
                 shape=Sphere(radius),
                 mass=mass,
+                render_action=True,
+                # TODO: put in u_mult capability
+                dynamics=DiffDrive(world, max_fwd_vel=self.max_linear_vel, max_ang_vel=self.max_angular_vel, integration="rk4"),
             )
             agent.agent_collision_rew = torch.zeros(batch_dim, device=device)
-
-            # TODO: add VelocityController!
-            # TODO: diff drive?
-            # controller_params = [0.2, 0.6, 0.0002]
-            # agent.controller = VelocityController(
-            #     agent, world, controller_params, "standard"
-            # )
-
             world.add_agent(agent)
 
         self.capabilities = torch.tensor(capabilities)
@@ -361,7 +365,9 @@ class Scenario(BaseScenario):
         return torch.cat(
             [
                 agent.state.pos,
+                agent.state.rot,
                 agent.state.vel,
+                agent.state.ang_vel,
                 *package_obs,
             ] + capability_repr,
             dim=-1,

@@ -14,6 +14,8 @@ class DiffDrive(Dynamics):
     def __init__(
         self,
         world: vmas.simulator.core.World,
+        max_fwd_vel: int,
+        max_ang_vel: int,
         integration: str = "rk4",  # one of "euler", "rk4"
     ):
         super().__init__()
@@ -22,6 +24,9 @@ class DiffDrive(Dynamics):
         self.dt = world.dt
         self.integration = integration
         self.world = world
+
+        self.max_fwd_vel = max_fwd_vel
+        self.max_ang_vel = max_ang_vel
 
     def euler(self, f, state):
         return state + self.dt * f(state)
@@ -41,6 +46,11 @@ class DiffDrive(Dynamics):
     def process_action(self):
         velocity = self.agent.action.u[:, 0]  # Forward velocity
         ang_velocity = self.agent.action.u[:, 1]  # Angular velocity
+
+        # scale velocity/ang_velocity by u_multiplier
+        # to simulate different speeds
+        velocity *= self.max_fwd_vel
+        ang_velocity *= self.max_ang_vel
 
         # Current state of the agent
         state = torch.cat((self.agent.state.pos, self.agent.state.rot), dim=1)
