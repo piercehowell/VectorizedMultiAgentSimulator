@@ -648,10 +648,10 @@ class Environment(TorchVectorizedObject):
 
             # set viewer to be square centered around origin + encopassing full world semidim
             self.viewer.set_bounds(
-                torch.tensor(-(1.2 * self.scenario.world_semidim) + self.scenario.render_origin[X], device=self.device),
-                torch.tensor((1.2 * self.scenario.world_semidim) + self.scenario.render_origin[X], device=self.device),
-                torch.tensor(-(1.2 * self.scenario.world_semidim) + self.scenario.render_origin[Y], device=self.device),
-                torch.tensor((1.2 * self.scenario.world_semidim) + self.scenario.render_origin[Y], device=self.device),
+                torch.tensor(-(zoom * self.scenario.world_semidim) + self.scenario.render_origin[X], device=self.device),
+                torch.tensor((zoom * self.scenario.world_semidim) + self.scenario.render_origin[X], device=self.device),
+                torch.tensor(-(zoom * self.scenario.world_semidim) + self.scenario.render_origin[Y], device=self.device),
+                torch.tensor((zoom * self.scenario.world_semidim) + self.scenario.render_origin[Y], device=self.device),
             )
         elif shared_viewer:
             # zoom out to fit everyone
