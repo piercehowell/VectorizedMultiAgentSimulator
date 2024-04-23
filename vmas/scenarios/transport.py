@@ -27,8 +27,10 @@ class Scenario(BaseScenario):
         self.n_packages = kwargs.get("n_packages", 1)
         self.package_width = kwargs.get("package_width", 0.15)
         self.package_length = kwargs.get("package_length", 0.15)
-        self.package_observation_radius = kwargs.get("package_observation_radius", 0.35)
+
+        # partial obs
         self.partial_observations = kwargs.get("partial_observations", True)
+        self.package_observation_radius = kwargs.get("package_observation_radius", 0.35)
 
         # realism
         self.linear_friction = kwargs.get("linear_friction", 0.1)
@@ -302,63 +304,14 @@ class Scenario(BaseScenario):
         return {"dist_to_goal": dist_to_goal, "dist_to_pkg": dist_to_pkg, "success_rate": success_rate,
                 "curiosity_state": self.curiosity_state(agent),
                 "agent_collision_rew": agent.agent_collision_rew}
-    
-    def partial_observation(self, agent: Agent):
+
+    def get_capability_repr(self, agent: Agent):
         """
-        Parital observation of the boxes for the agent
+        Get capability representation:
+            raw = raw multiplier values
+            relative = zero-meaned (taking mean of team into account)
+            mixed = raw + relative (concatenated)
         """
-         # get positions of all entities in this agent's reference frame
-        package_obs = []
-        out_of_obs_val = -0.0001 # default value used for out-of-observation data in the observation vector
-        for i, package in enumerate(self.packages):
-            # box starting position and goal position alway part of the observation
-            package_obs.append(self.og_package_positions[i])
-            package_obs.append(package.on_goal.unsqueeze(-1))
-            
-            mask = (torch.linalg.vector_norm(package.state.pos - agent.state.pos, dim=-1) < self.package_observation_radius)
-            pkg_state_vec = package.state.pos.clone()
-            pkg_vel_vec = package.state.vel.clone()
-            pkg_dist_to_goal_vec = package.state.pos - package.goal.state.pos
-            agent_dist_to_pkg_vec = package.state.pos - agent.state.pos
-            
-            pkg_state_vec[~mask] = out_of_obs_val
-            pkg_vel_vec[~mask] = out_of_obs_val
-            pkg_dist_to_goal_vec[~mask] = out_of_obs_val
-            agent_dist_to_pkg_vec[~mask] = out_of_obs_val
-
-            package_obs.append(pkg_state_vec)
-            package_obs.append(pkg_vel_vec)
-            package_obs.append(pkg_dist_to_goal_vec)
-            package_obs.append(agent_dist_to_pkg_vec)          
-
-        return torch.cat(
-            [
-                agent.state.pos,
-                agent.state.vel,
-                *package_obs,
-                torch.tensor(
-                    agent.u_multiplier, device=self.world.device
-                ).repeat(self.world.batch_dim, 1),
-                torch.tensor(
-                    agent.shape.radius, device=self.world.device
-                ).repeat(self.world.batch_dim, 1),
-                torch.tensor(
-                    agent.mass, device=self.world.device
-                ).repeat(self.world.batch_dim, 1),
-            ],
-            dim=-1,
-        )
-
-    def default_observation(self, agent: Agent):
-        # get positions of all entities in this agent's reference frame
-
-        package_obs = []
-        for package in self.packages:
-            package_obs.append(package.state.pos - package.goal.state.pos)
-            package_obs.append(package.state.pos - agent.state.pos)
-            package_obs.append(package.state.vel)
-            package_obs.append(package.on_goal.unsqueeze(-1))
-
         if self.capability_representation == "raw":
             # agent's normal capabilities
             u_mult = agent.u_multiplier
@@ -428,6 +381,59 @@ class Scenario(BaseScenario):
                     rel_mass, device=self.world.device
                 ).repeat(self.world.batch_dim, 1),
             ]
+        return capability_repr
+
+    
+    def partial_observation(self, agent: Agent):
+        """
+        Parital observation of the boxes for the agent
+        """
+         # get positions of all entities in this agent's reference frame
+        package_obs = []
+        out_of_obs_val = -0.0001 # default value used for out-of-observation data in the observation vector
+        for i, package in enumerate(self.packages):
+            # box starting position and goal position alway part of the observation
+            package_obs.append(self.og_package_positions[i])
+            package_obs.append(package.on_goal.unsqueeze(-1))
+            
+            mask = (torch.linalg.vector_norm(package.state.pos - agent.state.pos, dim=-1) < self.package_observation_radius)
+            pkg_state_vec = package.state.pos.clone()
+            pkg_vel_vec = package.state.vel.clone()
+            pkg_dist_to_goal_vec = package.state.pos - package.goal.state.pos
+            agent_dist_to_pkg_vec = package.state.pos - agent.state.pos
+            
+            pkg_state_vec[~mask] = out_of_obs_val
+            pkg_vel_vec[~mask] = out_of_obs_val
+            pkg_dist_to_goal_vec[~mask] = out_of_obs_val
+            agent_dist_to_pkg_vec[~mask] = out_of_obs_val
+
+            package_obs.append(pkg_state_vec)
+            package_obs.append(pkg_vel_vec)
+            package_obs.append(pkg_dist_to_goal_vec)
+            package_obs.append(agent_dist_to_pkg_vec)          
+
+        capability_repr = self.get_capability_repr(agent)
+
+        return torch.cat(
+            [
+                agent.state.pos,
+                agent.state.vel,
+                *package_obs,
+            ] + capability_repr,
+            dim=-1,
+        )
+
+    def default_observation(self, agent: Agent):
+        # get positions of all entities in this agent's reference frame
+
+        package_obs = []
+        for package in self.packages:
+            package_obs.append(package.state.pos - package.goal.state.pos)
+            package_obs.append(package.state.pos - agent.state.pos)
+            package_obs.append(package.state.vel)
+            package_obs.append(package.on_goal.unsqueeze(-1))
+
+        capability_repr = self.get_capability_repr(agent)
 
         return torch.cat(
             [
