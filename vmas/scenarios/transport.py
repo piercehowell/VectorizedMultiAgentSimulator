@@ -284,20 +284,13 @@ class Scenario(BaseScenario):
             package_obs.append(pkg_dist_to_goal_vec)
             package_obs.append(agent_dist_to_pkg_vec)          
 
+        capability_repr = self.get_capability_rep(agent)
         return torch.cat(
             [
                 agent.state.pos,
                 agent.state.vel,
                 *package_obs,
-                torch.tensor(
-                    agent.u_multiplier, device=self.world.device
-                ).repeat(self.world.batch_dim, 1),
-                torch.tensor(
-                    agent.shape.radius, device=self.world.device
-                ).repeat(self.world.batch_dim, 1),
-                torch.tensor(
-                    agent.mass, device=self.world.device
-                ).repeat(self.world.batch_dim, 1),
+                *capability_repr
             ],
             dim=-1,
         )
