@@ -11,6 +11,13 @@ from vmas.simulator.heuristic_policy import BaseHeuristicPolicy
 from vmas.simulator.scenario import BaseScenario
 from vmas.simulator.utils import Color, ScenarioUtils
 
+from typing import Dict, Callable, List
+from torch import Tensor
+
+import typing
+if typing.TYPE_CHECKING:
+    from vmas.simulator.rendering import Geom
+
 
 class Scenario(BaseScenario):
     def make_world(self, batch_dim: int, device: torch.device, **kwargs):
@@ -20,12 +27,14 @@ class Scenario(BaseScenario):
         self.n_packages = kwargs.get("n_packages", 1)
         self.package_width = kwargs.get("package_width", 0.15)
         self.package_length = kwargs.get("package_length", 0.15)
-        self.package_mass = kwargs.get("package_mass", 50)
+        self.package_observation_radius = kwargs.get("package_observation_radius", 0.35)
+        self.partial_observations = kwargs.get("partial_observations", True)
 
         # realism
         self.linear_friction = kwargs.get("linear_friction", 0.1)
         self.angular_friction = kwargs.get("angular_friction", 0.1)
-        self.drag = kwargs.get("drag", 0.1)
+        self.drag = kwargs.get("drag", 0.0)
+        self.package_mass = kwargs.get("package_mass", 50)
         # TODO: implement automated domain randomization here?
 
         # rewards
@@ -33,6 +42,8 @@ class Scenario(BaseScenario):
         self.package_goal_dist_reward_factor = kwargs.get("package_goal_dist_reward_factor", 100)
         self.interagent_collision_penalty = kwargs.get("interagent_collision_penalty", -1)
         assert self.interagent_collision_penalty < 0, f"self.interagent_collision_penalty must be < 0, current value is {self.interagent_collision_penalty}!"
+        self.add_dense_reward = kwargs.get("add_dense_reward", True)
+        self.package_on_goal_reward_factor = kwargs.get("package_on_goal_reward_factor", 1.0)
 
         # capabilities
         self.capability_mult_range = kwargs.get("capability_mult_range", [0.5, 2])
@@ -172,9 +183,16 @@ class Scenario(BaseScenario):
             ),
             occupied_positions=agent_occupied_positions,
         )
-
+        
+        self.package_starting_dists = []
+        self.og_package_positions = []
         for i, package in enumerate(self.packages):
             package.on_goal = self.world.is_overlapping(package, package.goal)
+            
+            self.og_package_positions.append(package.state.pos)
+            self.package_starting_dists.append(
+                torch.linalg.vector_norm(package.state.pos - package.goal.state.pos, dim=1)
+            )
 
             if env_index is None:
                 package.global_shaping = (
@@ -213,12 +231,18 @@ class Scenario(BaseScenario):
                     Color.GREEN.value, device=self.world.device, dtype=torch.float32
                 )
 
-                package_shaping = package.dist_to_goal * self.package_goal_dist_reward_factor
-                self.rew[~package.on_goal] += (
-                    package.global_shaping[~package.on_goal]
-                    - package_shaping[~package.on_goal]
-                )
-                package.global_shaping = package_shaping
+                # dense reward
+                if self.add_dense_reward:
+                    package_shaping = package.dist_to_goal * self.package_goal_dist_reward_factor
+                    self.rew[~package.on_goal] += (
+                        package.global_shaping[~package.on_goal]
+                        - package_shaping[~package.on_goal]
+                        )
+                    package.global_shaping = package_shaping
+                
+                # positive reward when the agent achieves the goal
+                self.rew[package.on_goal] += 1.0 * self.package_on_goal_reward_factor
+                
 
             # penalty (negative rew) for agent-agent collisions
             for a in self.world.agents:
@@ -238,12 +262,13 @@ class Scenario(BaseScenario):
                         ] += self.interagent_collision_penalty
 
         # reward for how close agents are to all packages
-        for i, package in enumerate(self.packages):
-            dist_to_pkg = torch.linalg.vector_norm(agent.state.pos - package.state.pos, dim=-1)
-            # any small distance gets "floored"
-            # dist_to_pkg[dist_to_pkg < 0.1] = 0.1
+        if self.add_dense_reward:
+            for i, package in enumerate(self.packages):
+                dist_to_pkg = torch.linalg.vector_norm(agent.state.pos - package.state.pos, dim=-1)
+                # any small distance gets "floored"
+                # dist_to_pkg[dist_to_pkg < 0.1] = 0.1
 
-            self.rew += -dist_to_pkg * self.agent_package_dist_reward_factor
+                self.rew += -dist_to_pkg * self.agent_package_dist_reward_factor
 
         return self.rew + agent.agent_collision_rew
     
@@ -273,14 +298,60 @@ class Scenario(BaseScenario):
             dim=-1
         ) / len(self.packages)
 
-        # TODO: double-check that agent_collision_rew works across all agents (and we're not just logging 1 agent's penalties)
-        return {"dist_to_goal": dist_to_goal, "dist_to_pkg":
-                dist_to_pkg, "success_rate": success_rate,
-                "agent_collision_rew": agent.agent_collision_rew,
-                }
+        # TODO(Kevin): double-check that agent_collision_rew works across all agents (and we're not just logging 1 agent's penalties)
+        return {"dist_to_goal": dist_to_goal, "dist_to_pkg": dist_to_pkg, "success_rate": success_rate,
+                "curiosity_state": self.curiosity_state(agent),
+                "agent_collision_rew": agent.agent_collision_rew}
+    
+    def partial_observation(self, agent: Agent):
+        """
+        Parital observation of the boxes for the agent
+        """
+         # get positions of all entities in this agent's reference frame
+        package_obs = []
+        out_of_obs_val = -0.0001 # default value used for out-of-observation data in the observation vector
+        for i, package in enumerate(self.packages):
+            # box starting position and goal position alway part of the observation
+            package_obs.append(self.og_package_positions[i])
+            package_obs.append(package.on_goal.unsqueeze(-1))
+            
+            mask = (torch.linalg.vector_norm(package.state.pos - agent.state.pos, dim=-1) < self.package_observation_radius)
+            pkg_state_vec = package.state.pos.clone()
+            pkg_vel_vec = package.state.vel.clone()
+            pkg_dist_to_goal_vec = package.state.pos - package.goal.state.pos
+            agent_dist_to_pkg_vec = package.state.pos - agent.state.pos
+            
+            pkg_state_vec[~mask] = out_of_obs_val
+            pkg_vel_vec[~mask] = out_of_obs_val
+            pkg_dist_to_goal_vec[~mask] = out_of_obs_val
+            agent_dist_to_pkg_vec[~mask] = out_of_obs_val
 
-    def observation(self, agent: Agent):
+            package_obs.append(pkg_state_vec)
+            package_obs.append(pkg_vel_vec)
+            package_obs.append(pkg_dist_to_goal_vec)
+            package_obs.append(agent_dist_to_pkg_vec)          
+
+        return torch.cat(
+            [
+                agent.state.pos,
+                agent.state.vel,
+                *package_obs,
+                torch.tensor(
+                    agent.u_multiplier, device=self.world.device
+                ).repeat(self.world.batch_dim, 1),
+                torch.tensor(
+                    agent.shape.radius, device=self.world.device
+                ).repeat(self.world.batch_dim, 1),
+                torch.tensor(
+                    agent.mass, device=self.world.device
+                ).repeat(self.world.batch_dim, 1),
+            ],
+            dim=-1,
+        )
+
+    def default_observation(self, agent: Agent):
         # get positions of all entities in this agent's reference frame
+
         package_obs = []
         for package in self.packages:
             package_obs.append(package.state.pos - package.goal.state.pos)
@@ -366,6 +437,38 @@ class Scenario(BaseScenario):
             ] + capability_repr,
             dim=-1,
         )
+    
+    def observation(self, agent: Agent):
+        if self.partial_observations:
+            return self.partial_observation(agent)
+        else:
+            return self.default_observation(agent)
+
+    def curiosity_state(self, agent: Agent):
+        """Curiosity state used for Random Netwok Distillation intrinsic
+        reward"""
+        package_obs = []
+        for i, package in enumerate(self.packages):
+            package_dist_from_goal_at_start = self.package_starting_dists[i]
+
+            # normalized
+            package_dist_to_goal = torch.linalg.vector_norm(package.state.pos - package.goal.state.pos, dim=1) / (package_dist_from_goal_at_start + 1e-6)
+            package_dist_to_goal = torch.clamp(package_dist_to_goal, -1e-6, 1.1)
+            package_dist_to_agent = torch.clamp(torch.linalg.vector_norm(package.state.pos - agent.state.pos, dim=1), 0.0, 1.0) * 0.001
+            package_vel = package.state.vel
+            package_obs += [
+                package_dist_to_goal.unsqueeze(-1),
+                package_dist_to_agent.unsqueeze(-1),
+                package_vel,
+            ]
+        cs = torch.cat(
+            [
+                *package_obs
+            ],
+            dim=-1
+        )
+        # print("CS", cs)
+        return cs
 
     def done(self):
         return torch.all(
@@ -375,7 +478,24 @@ class Scenario(BaseScenario):
             ),
             dim=-1,
         )
+    
+    def extra_render(self, env_index: int = 0) -> "List[Geom]":
+        from vmas.simulator import rendering
 
+        geoms: List[Geom] = []
+        if not self.partial_observations:
+            return geoms
+
+        for i, agent in enumerate(self.world.agents):
+
+            obs_circle = rendering.make_circle(self.package_observation_radius, filled=True)
+            xform = rendering.Transform()
+            xform.set_translation(*agent.state.pos[env_index])
+            obs_circle.add_attr(xform)
+            obs_circle.set_color(*(0.827, 0.827, 0.827, 0.65))
+            geoms.append(obs_circle)
+       
+        return geoms
 
 class HeuristicPolicy(BaseHeuristicPolicy):
     def __init__(self, *args, **kwargs):
