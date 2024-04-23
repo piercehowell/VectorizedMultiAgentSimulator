@@ -398,17 +398,23 @@ class Scenario(BaseScenario):
             
             mask = (torch.linalg.vector_norm(package.state.pos - agent.state.pos, dim=-1) < self.package_observation_radius)
             pkg_state_vec = package.state.pos.clone()
+            pkg_rot_vec = package.state.rot.clone()
             pkg_vel_vec = package.state.vel.clone()
+            pkg_ang_vel_vec = package.state.ang_vel.clone()
             pkg_dist_to_goal_vec = package.state.pos - package.goal.state.pos
             agent_dist_to_pkg_vec = package.state.pos - agent.state.pos
             
             pkg_state_vec[~mask] = out_of_obs_val
+            pkg_rot_vec[~mask] = out_of_obs_val
             pkg_vel_vec[~mask] = out_of_obs_val
+            pkg_ang_vel_vec[~mask] = out_of_obs_val
             pkg_dist_to_goal_vec[~mask] = out_of_obs_val
             agent_dist_to_pkg_vec[~mask] = out_of_obs_val
 
             package_obs.append(pkg_state_vec)
+            package_obs.append(pkg_rot_vec)
             package_obs.append(pkg_vel_vec)
+            package_obs.append(pkg_ang_vel_vec)
             package_obs.append(pkg_dist_to_goal_vec)
             package_obs.append(agent_dist_to_pkg_vec)          
 
@@ -429,8 +435,11 @@ class Scenario(BaseScenario):
         package_obs = []
         for package in self.packages:
             package_obs.append(package.state.pos - package.goal.state.pos)
+            # NOTE: this is the raw observed rotation, rather than relative to goal rotation (since we don't care at what angle  the pkg gets to goal)
+            package_obs.append(package.state.rot)
             package_obs.append(package.state.pos - agent.state.pos)
             package_obs.append(package.state.vel)
+            package_obs.append(package.state.ang_vel)
             package_obs.append(package.on_goal.unsqueeze(-1))
 
         capability_repr = self.get_capability_repr(agent)
