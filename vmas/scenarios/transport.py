@@ -43,7 +43,7 @@ class Scenario(BaseScenario):
         self.agent_package_dist_reward_factor = kwargs.get("agent_package_dist_reward_factor", 0.1)
         self.package_goal_dist_reward_factor = kwargs.get("package_goal_dist_reward_factor", 100)
         self.interagent_collision_penalty = kwargs.get("interagent_collision_penalty", -1)
-        assert self.interagent_collision_penalty < 0, f"self.interagent_collision_penalty must be < 0, current value is {self.interagent_collision_penalty}!"
+        assert self.interagent_collision_penalty <= 0, f"self.interagent_collision_penalty must be <= 0, current value is {self.interagent_collision_penalty}!"
         self.add_dense_reward = kwargs.get("add_dense_reward", True)
         self.package_on_goal_reward_factor = kwargs.get("package_on_goal_reward_factor", 1.0)
 
