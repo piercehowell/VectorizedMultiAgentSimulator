@@ -457,7 +457,7 @@ class Scenario(BaseScenario):
             package_obs.append(package.state.vel)
             package_obs.append(package.on_goal.unsqueeze(-1))
 
-        capability_repr = self.get_capability_rep(agent)
+        capability_repr = self.get_capability_repr(agent)
         return torch.cat(
             [
                 agent.state.pos,
@@ -510,7 +510,7 @@ class Scenario(BaseScenario):
                         package_to_agent_state_diff
                     ]
                 
-                capability_repr = self.get_capability_rep(agent)
+                capability_repr = self.get_capability_repr(agent)
                 agent_related_obs += [
                     agent.state.pos,
                     agent.state.rot,
