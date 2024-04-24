@@ -8,6 +8,7 @@ import numpy as np
 
 from vmas import render_interactively
 from vmas.simulator.core import Agent, Box, Landmark, Sphere, World
+from vmas.simulator.dynamics.diff_drive import DiffDrive
 from vmas.simulator.heuristic_policy import BaseHeuristicPolicy
 from vmas.simulator.scenario import BaseScenario
 from vmas.simulator.utils import Color, ScenarioUtils
@@ -134,15 +135,10 @@ class Scenario(BaseScenario):
                 u_multiplier=u_mult,
                 shape=Sphere(radius),
                 mass=mass,
+                dynamics=DiffDrive(world),
+                render_action=True,
             )
             agent.agent_collision_rew = torch.zeros(batch_dim, device=device)
-
-            # TODO: add VelocityController!
-            # TODO: diff drive?
-            # controller_params = [0.2, 0.6, 0.0002]
-            # agent.controller = VelocityController(
-            #     agent, world, controller_params, "standard"
-            # )
 
             world.add_agent(agent)
 
