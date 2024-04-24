@@ -22,27 +22,43 @@ if typing.TYPE_CHECKING:
 class Scenario(BaseScenario):
     def make_world(self, batch_dim: int, device: torch.device, **kwargs):
         n_agents = kwargs.get("n_agents", 4)
+
+        # packages
         self.n_packages = kwargs.get("n_packages", 1)
         self.package_width = kwargs.get("package_width", 0.15)
         self.package_length = kwargs.get("package_length", 0.15)
-        self.package_observation_radius = kwargs.get("package_observation_radius", 0.35)
-        self.partial_observations = kwargs.get("partial_observations", True)
 
+        # partial obs
+        self.partial_observations = kwargs.get("partial_observations", True)
+        self.package_observation_radius = kwargs.get("package_observation_radius", 0.35)
+
+        # realism
+        self.linear_friction = kwargs.get("linear_friction", 0.1)
+        self.angular_friction = kwargs.get("angular_friction", 0.1)
+        self.drag = kwargs.get("drag", 0.0)
         self.package_mass = kwargs.get("package_mass", 50)
-        
-        self.add_dense_reward = kwargs.get("add_dense_reward", True)
+        # TODO: implement automated domain randomization here?
+
+        # rewards
         self.agent_package_dist_reward_factor = kwargs.get("agent_package_dist_reward_factor", 0.1)
         self.package_goal_dist_reward_factor = kwargs.get("package_goal_dist_reward_factor", 100)
+        self.interagent_collision_penalty = kwargs.get("interagent_collision_penalty", -1)
+        assert self.interagent_collision_penalty <= 0, f"self.interagent_collision_penalty must be <= 0, current value is {self.interagent_collision_penalty}!"
+        self.add_dense_reward = kwargs.get("add_dense_reward", True)
         self.package_on_goal_reward_factor = kwargs.get("package_on_goal_reward_factor", 1.0)
+
+        # capabilities
         self.capability_mult_range = kwargs.get("capability_mult_range", [0.5, 2])
         self.capability_mult_min = self.capability_mult_range[0]
         self.capability_mult_max = self.capability_mult_range[1]
         self.capability_representation = kwargs.get("capability_representation", "raw")
 
+        # general world settings
         self.world_semidim = 0.75 
         self.default_agent_radius = 0.03
         self.default_agent_u = 0.6
         self.default_agent_mass = 1.0
+        self.min_collision_distance = 0.05 * self.default_agent_radius # default navigation collision dist is 5% of the agent radius
 
         # Make world
         world = World(
@@ -54,6 +70,9 @@ class Scenario(BaseScenario):
             y_semidim=self.world_semidim
             + 2 * self.default_agent_radius
             + max(self.package_length, self.package_width),
+            linear_friction=self.linear_friction,
+            angular_friction=self.angular_friction,
+            drag=self.drag,
         )
 
         # Add agents
@@ -71,8 +90,17 @@ class Scenario(BaseScenario):
                 shape=Sphere(radius),
                 mass=mass,
             )
+            agent.agent_collision_rew = torch.zeros(batch_dim, device=device)
+
+            # TODO: add VelocityController!
+            # TODO: diff drive?
+            # controller_params = [0.2, 0.6, 0.0002]
+            # agent.controller = VelocityController(
+            #     agent, world, controller_params, "standard"
+            # )
 
             world.add_agent(agent)
+
         self.capabilities = torch.tensor(capabilities)
 
         # Add landmarks
@@ -89,6 +117,7 @@ class Scenario(BaseScenario):
                 name=f"package {i}",
                 collide=True,
                 movable=True,
+                rotatable=True,
                 mass=self.package_mass,
                 shape=Box(length=self.package_length, width=self.package_width),
                 color=Color.RED,
@@ -183,14 +212,15 @@ class Scenario(BaseScenario):
                 )
 
     def reward(self, agent: Agent):
-        # reward for how close package is to goal
-        # (by default, agents are only rewarded in this way + reward is shared)
+        # rewards under is_first only need to be applied once
         is_first = agent == self.world.agents[0]
         if is_first:
             self.rew = torch.zeros(
                 self.world.batch_dim, device=self.world.device, dtype=torch.float32
             )
 
+            # reward for how close package is to goal
+            # (shared across team)
             for i, package in enumerate(self.packages):
                 package.dist_to_goal = torch.linalg.vector_norm(
                     package.state.pos - package.goal.state.pos, dim=1
@@ -216,6 +246,23 @@ class Scenario(BaseScenario):
                 self.rew[package.on_goal] += 1.0 * self.package_on_goal_reward_factor
                 
 
+            # penalty (negative rew) for agent-agent collisions
+            for a in self.world.agents:
+                a.agent_collision_rew[:] = 0
+
+            for i, a in enumerate(self.world.agents):
+                for j, b in enumerate(self.world.agents):
+                    if i <= j:
+                        continue
+                    if self.world.collides(a, b):
+                        distance = self.world.get_distance(a, b)
+                        a.agent_collision_rew[
+                            distance <= self.min_collision_distance
+                        ] += self.interagent_collision_penalty
+                        b.agent_collision_rew[
+                            distance <= self.min_collision_distance
+                        ] += self.interagent_collision_penalty
+
         # reward for how close agents are to all packages
         if self.add_dense_reward:
             for i, package in enumerate(self.packages):
@@ -225,7 +272,7 @@ class Scenario(BaseScenario):
 
                 self.rew += -dist_to_pkg * self.agent_package_dist_reward_factor
 
-        return self.rew
+        return self.rew + agent.agent_collision_rew
     
     def info(self, agent: Agent):
         """
@@ -253,65 +300,18 @@ class Scenario(BaseScenario):
             dim=-1
         ) / len(self.packages)
 
+        # TODO(Kevin): double-check that agent_collision_rew works across all agents (and we're not just logging 1 agent's penalties)
         return {"dist_to_goal": dist_to_goal, "dist_to_pkg": dist_to_pkg, "success_rate": success_rate,
-                "curiosity_state": self.curiosity_state(agent)}
-    
-    def partial_observation(self, agent: Agent):
+                "curiosity_state": self.curiosity_state(agent),
+                "agent_collision_rew": agent.agent_collision_rew}
+
+    def get_capability_repr(self, agent: Agent):
         """
-        Parital observation of the boxes for the agent
+        Get capability representation:
+            raw = raw multiplier values
+            relative = zero-meaned (taking mean of team into account)
+            mixed = raw + relative (concatenated)
         """
-         # get positions of all entities in this agent's reference frame
-        package_obs = []
-        out_of_obs_val = -0.0001 # default value used for out-of-observation data in the observation vector
-        for i, package in enumerate(self.packages):
-            # box starting position and goal position alway part of the observation
-            package_obs.append(self.og_package_positions[i])
-            package_obs.append(package.on_goal.unsqueeze(-1))
-            
-            mask = (torch.linalg.vector_norm(package.state.pos - agent.state.pos, dim=-1) < self.package_observation_radius)
-            pkg_state_vec = package.state.pos.clone()
-            pkg_vel_vec = package.state.vel.clone()
-            pkg_dist_to_goal_vec = package.state.pos - package.goal.state.pos
-            agent_dist_to_pkg_vec = package.state.pos - agent.state.pos
-            
-            pkg_state_vec[~mask] = out_of_obs_val
-            pkg_vel_vec[~mask] = out_of_obs_val
-            pkg_dist_to_goal_vec[~mask] = out_of_obs_val
-            agent_dist_to_pkg_vec[~mask] = out_of_obs_val
-
-            package_obs.append(pkg_state_vec)
-            package_obs.append(pkg_vel_vec)
-            package_obs.append(pkg_dist_to_goal_vec)
-            package_obs.append(agent_dist_to_pkg_vec)          
-
-        return torch.cat(
-            [
-                agent.state.pos,
-                agent.state.vel,
-                *package_obs,
-                torch.tensor(
-                    agent.u_multiplier, device=self.world.device
-                ).repeat(self.world.batch_dim, 1),
-                torch.tensor(
-                    agent.shape.radius, device=self.world.device
-                ).repeat(self.world.batch_dim, 1),
-                torch.tensor(
-                    agent.mass, device=self.world.device
-                ).repeat(self.world.batch_dim, 1),
-            ],
-            dim=-1,
-        )
-
-    def default_observation(self, agent: Agent):
-        # get positions of all entities in this agent's reference frame
-
-        package_obs = []
-        for package in self.packages:
-            package_obs.append(package.state.pos - package.goal.state.pos)
-            package_obs.append(package.state.pos - agent.state.pos)
-            package_obs.append(package.state.vel)
-            package_obs.append(package.on_goal.unsqueeze(-1))
-
         if self.capability_representation == "raw":
             # agent's normal capabilities
             u_mult = agent.u_multiplier
@@ -381,6 +381,68 @@ class Scenario(BaseScenario):
                     rel_mass, device=self.world.device
                 ).repeat(self.world.batch_dim, 1),
             ]
+        return capability_repr
+
+    
+    def partial_observation(self, agent: Agent):
+        """
+        Parital observation of the boxes for the agent
+        """
+         # get positions of all entities in this agent's reference frame
+        package_obs = []
+        out_of_obs_val = -0.0001 # default value used for out-of-observation data in the observation vector
+        for i, package in enumerate(self.packages):
+            # box starting position and goal position alway part of the observation
+            package_obs.append(self.og_package_positions[i])
+            package_obs.append(package.on_goal.unsqueeze(-1))
+            
+            mask = (torch.linalg.vector_norm(package.state.pos - agent.state.pos, dim=-1) < self.package_observation_radius)
+            pkg_state_vec = package.state.pos.clone()
+            pkg_rot_vec = package.state.rot.clone()
+            pkg_vel_vec = package.state.vel.clone()
+            pkg_ang_vel_vec = package.state.ang_vel.clone()
+            pkg_dist_to_goal_vec = package.state.pos - package.goal.state.pos
+            agent_dist_to_pkg_vec = package.state.pos - agent.state.pos
+            
+            pkg_state_vec[~mask] = out_of_obs_val
+            pkg_rot_vec[~mask] = out_of_obs_val
+            pkg_vel_vec[~mask] = out_of_obs_val
+            pkg_ang_vel_vec[~mask] = out_of_obs_val
+            pkg_dist_to_goal_vec[~mask] = out_of_obs_val
+            agent_dist_to_pkg_vec[~mask] = out_of_obs_val
+
+            package_obs.append(pkg_state_vec)
+            package_obs.append(pkg_rot_vec)
+            package_obs.append(pkg_vel_vec)
+            package_obs.append(pkg_ang_vel_vec)
+            package_obs.append(pkg_dist_to_goal_vec)
+            package_obs.append(agent_dist_to_pkg_vec)          
+
+        capability_repr = self.get_capability_repr(agent)
+
+        return torch.cat(
+            [
+                agent.state.pos,
+                agent.state.vel,
+                *package_obs,
+            ] + capability_repr,
+            dim=-1,
+        )
+
+    def default_observation(self, agent: Agent):
+        # get positions of all entities in this agent's reference frame
+
+        package_obs = []
+        for package in self.packages:
+            package_obs.append(package.state.pos - package.goal.state.pos)
+            # NOTE: this is the raw observed rotation, rather than relative to goal rotation (since we don't care at what angle  the pkg gets to goal)
+            package_obs.append(package.state.rot)
+            package_obs.append(package.state.pos - agent.state.pos)
+            package_obs.append(package.state.vel)
+            package_obs.append(package.state.ang_vel)
+            package_obs.append(package.on_goal.unsqueeze(-1))
+
+        capability_repr = self.get_capability_repr(agent)
 
         return torch.cat(
             [
@@ -392,7 +454,6 @@ class Scenario(BaseScenario):
         )
     
     def observation(self, agent: Agent):
-        
         if self.partial_observations:
             return self.partial_observation(agent)
         else:
