@@ -67,10 +67,10 @@ class Scenario(BaseScenario):
         # general world settings
         self.world_semidim = kwargs.get("world_semidim", 1.0) # m
         self.default_agent_radius = kwargs.get("default_agent_radius", 0.35) # m
-        # TODO: separate for linear/angular, rename to "max agent u"
-        # TODO: also, real turtlebots don't seem to be able to accelerate backwards well
-        # for now, we take the max linear velocity
-        self.default_agent_u = kwargs.get("default_agent_u", 0.46) # m/s
+        # TODO: real turtlebots don't seem to be able to accelerate backwards well
+        # shift distribution of linear actions to + only?
+        self.default_agent_max_linear_vel = kwargs.get("default_agent_max_linear_vel", 0.46) # m/s
+        self.default_agent_max_angular_vel = kwargs.get("default_agent_max_angular_vel", 1.9) # rad/s
         self.default_agent_mass = kwargs.get("default_agent_mass", 3.9) # kg
 
         # packages
@@ -129,15 +129,16 @@ class Scenario(BaseScenario):
         # Add agents
         capabilities = [] # save capabilities for relative capabilities later
         for i in range(n_agents):
-            u_mult = self.default_agent_u * random.uniform(self.capability_mult_min, self.capability_mult_max)
+            max_linear_vel = self.default_agent_max_linear_vel * random.uniform(self.capability_mult_min, self.capability_mult_max)
+            max_angular_vel = self.default_agent_max_angular_vel * random.uniform(self.capability_mult_min, self.capability_mult_max)
             radius = self.default_agent_radius * random.uniform(self.capability_mult_min, self.capability_mult_max)
             mass = self.default_agent_mass * random.uniform(self.capability_mult_min, self.capability_mult_max)
 
-            capabilities.append([u_mult, radius, mass])
+            capabilities.append([max_linear_vel, max_angular_vel, radius, mass])
 
             agent = Agent(
                 name=f"agent_{i}", 
-                u_multiplier=u_mult,
+                u_multiplier=[max_linear_vel, max_angular_vel],
                 shape=Sphere(radius),
                 mass=mass,
                 dynamics=DiffDrive(world),
@@ -187,13 +188,14 @@ class Scenario(BaseScenario):
         if not env_index:        
             capabilities = [] # save capabilities for relative capabilities later
             for agent in self.world.agents:
-                u_mult = self.default_agent_u * random.uniform(self.capability_mult_min, self.capability_mult_max)
+                max_linear_vel = self.default_agent_max_linear_vel * random.uniform(self.capability_mult_min, self.capability_mult_max)
+                max_angular_vel = self.default_agent_max_angular_vel * random.uniform(self.capability_mult_min, self.capability_mult_max)
                 radius = self.default_agent_radius * random.uniform(self.capability_mult_min, self.capability_mult_max)
                 mass = self.default_agent_mass * random.uniform(self.capability_mult_min, self.capability_mult_max)
 
-                capabilities.append([u_mult, radius, mass])
+                capabilities.append([max_linear_vel, max_angular_vel, radius, mass])
 
-                agent.u_multiplier=u_mult
+                agent.u_multiplier=[max_linear_vel, max_angular_vel]
                 agent.shape=Sphere(radius)
                 agent.mass=mass
 
@@ -380,76 +382,55 @@ class Scenario(BaseScenario):
             relative = zero-meaned (taking mean of team into account)
             mixed = raw + relative (concatenated)
         """
+        # agent's normal capabilities
+        max_linear_vel, max_angular_vel = agent.u_multiplier
+        radius = agent.shape.radius
+        mass = agent.mass
+
+        # compute the mean capabilities across the team's agents
+        # then compute "relative capability" of this agent by subtracting the mean
+        team_mean = list(torch.mean(self.capabilities, dim=0))
+        rel_max_linear_vel = max_linear_vel - team_mean[0].item()
+        rel_max_angular_vel = max_angular_vel - team_mean[1].item()
+        rel_radius = radius - team_mean[2].item()
+        rel_mass = mass - team_mean[3].item()
+
+        raw_capability_repr = [
+            torch.tensor(
+                max_linear_vel, device=self.world.device
+            ).repeat(self.world.batch_dim, 1),
+            torch.tensor(
+                max_angular_vel, device=self.world.device
+            ).repeat(self.world.batch_dim, 1),
+            torch.tensor(
+                radius, device=self.world.device
+            ).repeat(self.world.batch_dim, 1),
+            torch.tensor(
+                mass, device=self.world.device
+            ).repeat(self.world.batch_dim, 1),
+        ]
+
+        rel_capability_repr = [
+            torch.tensor(
+                rel_max_linear_vel, device=self.world.device
+            ).repeat(self.world.batch_dim, 1),
+            torch.tensor(
+                rel_max_angular_vel, device=self.world.device
+            ).repeat(self.world.batch_dim, 1),
+            torch.tensor(
+                rel_radius, device=self.world.device
+            ).repeat(self.world.batch_dim, 1),
+            torch.tensor(
+                rel_mass, device=self.world.device
+            ).repeat(self.world.batch_dim, 1),
+        ]
+
         if self.capability_representation == "raw":
-            # agent's normal capabilities
-            u_mult = agent.u_multiplier
-            radius = agent.shape.radius
-            mass = agent.mass
-
-            capability_repr = [
-                torch.tensor(
-                    u_mult, device=self.world.device
-                ).repeat(self.world.batch_dim, 1),
-                torch.tensor(
-                    radius, device=self.world.device
-                ).repeat(self.world.batch_dim, 1),
-                torch.tensor(
-                    mass, device=self.world.device
-                ).repeat(self.world.batch_dim, 1),
-            ]
-
+            return raw_capability_repr
         elif self.capability_representation == "relative":
-            # compute the mean capabilities across the team's agents
-            team_mean = list(torch.mean(self.capabilities, dim=0))
-            # then compute "relative capability" of this agent by subtracting the mean
-            rel_u_mult = agent.u_multiplier - team_mean[0].item()
-            rel_radius = agent.shape.radius - team_mean[1].item()
-            rel_mass = agent.mass - team_mean[2].item()
-            capability_repr = [
-                torch.tensor(
-                    rel_u_mult, device=self.world.device
-                ).repeat(self.world.batch_dim, 1),
-                torch.tensor(
-                    rel_radius, device=self.world.device
-                ).repeat(self.world.batch_dim, 1),
-                torch.tensor(
-                    rel_mass, device=self.world.device
-                ).repeat(self.world.batch_dim, 1),
-            ]
-
+            return rel_capability_repr
         elif self.capability_representation == "mixed":
-            # agent's normal capabilities
-            u_mult = agent.u_multiplier
-            radius = agent.shape.radius
-            mass = agent.mass
-
-            # compute the mean capabilities across the team's agents
-            team_mean = list(torch.mean(self.capabilities, dim=0))
-            # then compute "relative capability" of this agent by subtracting the mean
-            rel_u_mult = agent.u_multiplier - team_mean[0].item()
-            rel_radius = agent.shape.radius - team_mean[1].item()
-            rel_mass = agent.mass - team_mean[2].item()
-            capability_repr = [
-                torch.tensor(
-                    u_mult, device=self.world.device
-                ).repeat(self.world.batch_dim, 1),
-                torch.tensor(
-                    radius, device=self.world.device
-                ).repeat(self.world.batch_dim, 1),
-                torch.tensor(
-                    mass, device=self.world.device
-                ).repeat(self.world.batch_dim, 1),
-                torch.tensor(
-                    rel_u_mult, device=self.world.device
-                ).repeat(self.world.batch_dim, 1),
-                torch.tensor(
-                    rel_radius, device=self.world.device
-                ).repeat(self.world.batch_dim, 1),
-                torch.tensor(
-                    rel_mass, device=self.world.device
-                ).repeat(self.world.batch_dim, 1),
-            ]
-        return capability_repr
+            return raw_capability_repr + rel_capability_repr
 
     
     def partial_observation(self, agent: Agent):
@@ -491,7 +472,9 @@ class Scenario(BaseScenario):
         return torch.cat(
             [
                 agent.state.pos,
+                agent.state.rot,
                 agent.state.vel,
+                agent.state.ang_vel,
                 *package_obs,
             ] + capability_repr,
             dim=-1,
@@ -515,7 +498,9 @@ class Scenario(BaseScenario):
         return torch.cat(
             [
                 agent.state.pos,
+                agent.state.rot,
                 agent.state.vel,
+                agent.state.ang_vel,
                 *package_obs,
             ] + capability_repr,
             dim=-1,
