@@ -64,10 +64,20 @@ class Scenario(BaseScenario):
 
         n_agents = kwargs.get("n_agents", 4)
 
+        # general world settings
+        self.world_semidim = kwargs.get("world_semidim", 1.0) # m
+        self.default_agent_radius = kwargs.get("default_agent_radius", 0.35) # m
+        # TODO: separate for linear/angular, rename to "max agent u"
+        # TODO: also, real turtlebots don't seem to be able to accelerate backwards well
+        # for now, we take the max linear velocity
+        self.default_agent_u = kwargs.get("default_agent_u", 0.46) # m/s
+        self.default_agent_mass = kwargs.get("default_agent_mass", 3.9) # kg
+
         # packages
         self.n_packages = kwargs.get("n_packages", 1)
         self.package_width = kwargs.get("package_width", 0.15)
         self.package_length = kwargs.get("package_length", 0.15)
+        self.package_mass = kwargs.get("package_mass", 50)
 
         # partial obs
         self.partial_observations = kwargs.get("partial_observations", True)
@@ -77,14 +87,16 @@ class Scenario(BaseScenario):
         self.linear_friction = kwargs.get("linear_friction", 0.1)
         self.angular_friction = kwargs.get("angular_friction", 0.1)
         self.drag = kwargs.get("drag", 0.0)
-        self.package_mass = kwargs.get("package_mass", 50)
         # TODO: implement automated domain randomization here?
 
         # rewards
         self.agent_package_dist_reward_factor = kwargs.get("agent_package_dist_reward_factor", 0.1)
         self.package_goal_dist_reward_factor = kwargs.get("package_goal_dist_reward_factor", 100)
+
+        self.min_collision_distance = 0.05 * self.default_agent_radius # default navigation collision dist is 5% of the agent radius
         self.interagent_collision_penalty = kwargs.get("interagent_collision_penalty", -1)
         assert self.interagent_collision_penalty <= 0, f"self.interagent_collision_penalty must be <= 0, current value is {self.interagent_collision_penalty}!"
+
         self.add_dense_reward = kwargs.get("add_dense_reward", True)
         self.package_on_goal_reward_factor = kwargs.get("package_on_goal_reward_factor", 1.0)
 
@@ -93,13 +105,6 @@ class Scenario(BaseScenario):
         self.capability_mult_min = self.capability_mult_range[0]
         self.capability_mult_max = self.capability_mult_range[1]
         self.capability_representation = kwargs.get("capability_representation", "raw")
-
-        # general world settings
-        self.world_semidim = 0.75 
-        self.default_agent_radius = 0.03
-        self.default_agent_u = 0.6
-        self.default_agent_mass = 1.0
-        self.min_collision_distance = 0.05 * self.default_agent_radius # default navigation collision dist is 5% of the agent radius
 
         rng_state = None
         if self.eval_seed:
