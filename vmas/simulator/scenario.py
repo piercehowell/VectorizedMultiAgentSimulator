@@ -11,7 +11,7 @@ from torch import Tensor
 from vmas.simulator.core import World, Agent
 from vmas.simulator.utils import (
     INITIAL_VIEWER_SIZE,
-    VIEWER_MIN_ZOOM,
+    VIEWER_DEFAULT_ZOOM,
     AGENT_OBS_TYPE,
     AGENT_REWARD_TYPE,
     AGENT_INFO_TYPE,
@@ -27,8 +27,10 @@ class BaseScenario(ABC):
         self._world = None
         # This is the viewer size and can be set in the `make_world' function
         self.viewer_size = INITIAL_VIEWER_SIZE
-        # This is the zoom level of the rendering
-        self.viewer_zoom = VIEWER_MIN_ZOOM
+        self.viewer_zoom = VIEWER_DEFAULT_ZOOM
+        """The zoom of the rendering camera (a lower value means more zoom). This can be changed in the :class:`~make_world` function. """
+        self.render_origin = (0.0, 0.0)
+        """The origin of the rendering camera when ``agent_index_to_focus`` is None in the ``render()`` arguments. This can be changed in the :class:`~make_world` function. """
         # Whether to plot a grid in the scenario background
         self.plot_grid = False
         # The distance between lines in the background grid

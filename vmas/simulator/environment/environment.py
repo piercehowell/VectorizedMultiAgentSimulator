@@ -13,7 +13,6 @@ from vmas.simulator.core import Agent, TorchVectorizedObject
 from vmas.simulator.scenario import BaseScenario
 import vmas.simulator.utils
 from vmas.simulator.utils import (
-    VIEWER_MIN_ZOOM,
     AGENT_OBS_TYPE,
     X,
     Y,
@@ -613,7 +612,9 @@ class Environment(TorchVectorizedObject):
 
             self._init_rendering()
 
-        zoom = max(VIEWER_MIN_ZOOM, self.scenario.viewer_zoom)
+        if self.scenario.viewer_zoom <= 0:
+            raise ValueError("Scenario viewer zoom must be > 0")
+        zoom = self.scenario.viewer_zoom
 
         if aspect_ratio < 1:
             cam_range = torch.tensor([zoom, zoom / aspect_ratio], device=self.device)
@@ -645,12 +646,12 @@ class Environment(TorchVectorizedObject):
                 ])
             )
 
-            # set viewer to be square centered around centroid
+            # set viewer to be square centered around origin + encopassing full world semidim
             self.viewer.set_bounds(
-                centroid[X] - side - (2 * max_shape_radius),
-                centroid[X] + side + (2 * max_shape_radius),
-                centroid[Y] - side - (2 * max_shape_radius),
-                centroid[Y] + side + (2 * max_shape_radius),
+                torch.tensor(-(zoom * self.scenario.world_semidim) + self.scenario.render_origin[X], device=self.device),
+                torch.tensor((zoom * self.scenario.world_semidim) + self.scenario.render_origin[X], device=self.device),
+                torch.tensor(-(zoom * self.scenario.world_semidim) + self.scenario.render_origin[Y], device=self.device),
+                torch.tensor((zoom * self.scenario.world_semidim) + self.scenario.render_origin[Y], device=self.device),
             )
         elif shared_viewer:
             # zoom out to fit everyone
@@ -663,8 +664,12 @@ class Environment(TorchVectorizedObject):
             viewer_size_fit = (
                 torch.stack(
                     [
-                        torch.max(torch.abs(all_poses[:, X])),
-                        torch.max(torch.abs(all_poses[:, Y])),
+                        torch.max(
+                            torch.abs(all_poses[:, X] - self.scenario.render_origin[X])
+                        ),
+                        torch.max(
+                            torch.abs(all_poses[:, Y] - self.scenario.render_origin[Y])
+                        ),
                     ]
                 )
                 + 2 * max_agent_radius
@@ -675,10 +680,10 @@ class Environment(TorchVectorizedObject):
             )
             cam_range *= torch.max(viewer_size)
             self.viewer.set_bounds(
-                -cam_range[X],
-                cam_range[X],
-                -cam_range[Y],
-                cam_range[Y],
+                -cam_range[X] + self.scenario.render_origin[X],
+                cam_range[X] + self.scenario.render_origin[X],
+                -cam_range[Y] + self.scenario.render_origin[Y],
+                cam_range[Y] + self.scenario.render_origin[Y],
             )
         else:
             # update bounds to center around agent
