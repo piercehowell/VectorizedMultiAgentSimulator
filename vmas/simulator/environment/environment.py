@@ -68,6 +68,7 @@ class Environment(TorchVectorizedObject):
         self.action_space = self.get_action_space()
         self.observation_space = self.get_observation_space()
         self.curiosity_state_space = self.get_curiosity_state_space() if hasattr(self.scenario, 'curiosity_state') else None
+        self.environment_state_space = self.get_environment_state_space() if hasattr(self.scenario, 'environment_state') else None
         # print(self.curiosity_state_space)
         # rendering
         self.viewer = None
@@ -318,7 +319,25 @@ class Environment(TorchVectorizedObject):
                     for agent in self.agents
                 }
             )
-
+    def get_environment_state_space(self):
+        agent = self.agents[0]
+        if not self.dict_spaces:
+            return spaces.Tuple(
+                [
+                    self.get_agent_environment_state_space(
+                        agent, self.scenario.environment_state(agent)
+                    )
+                ]
+            )
+        else:
+            return spaces.Dict(
+                {
+                    agent.name: self.get_agent_environment_state_space(
+                        agent, self.scenario.environment_state(agent)
+                    )
+                }
+            )
+        
     def get_agent_action_size(self, agent: Agent):
         if self.continuous_actions:
             return agent.action.action_size + (
@@ -400,6 +419,26 @@ class Environment(TorchVectorizedObject):
         else:
             raise NotImplementedError(
                 f"Invalid type of curiosity_state {obs} for agent {agent.name}"
+            )
+        
+    def get_agent_environment_state_space(self, agent: Agent, obs: AGENT_OBS_TYPE):
+        if isinstance(obs, Tensor):
+            return spaces.Box(
+                low=-np.float32("inf"),
+                high=np.float32("inf"),
+                shape=(len(obs[0]),),
+                dtype=np.float32,
+            )
+        elif isinstance(obs, Dict):
+            return spaces.Dict(
+                {
+                    key: self.get_agent_environment_state_space(agent, value)
+                    for key, value in obs.items()
+                }
+            )
+        else:
+            raise NotImplementedError(
+                f"Invalid type of environment_state {obs} for agent {agent.name}"
             )
 
     def _check_discrete_action(self, action: Tensor, low: int, high: int, type: str):

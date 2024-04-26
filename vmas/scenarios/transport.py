@@ -67,6 +67,7 @@ class Scenario(BaseScenario):
         self.n_packages = kwargs.get("n_packages", 1)
         self.package_width = kwargs.get("package_width", 0.15)
         self.package_length = kwargs.get("package_length", 0.15)
+        self.package_rotatable = kwargs.get("package_rotatable", True)
 
         # partial obs
         self.partial_observations = kwargs.get("partial_observations", True)
@@ -162,7 +163,7 @@ class Scenario(BaseScenario):
                 name=f"package {i}",
                 collide=True,
                 movable=True,
-                rotatable=True,
+                rotatable=self.package_rotatable,
                 mass=self.package_mass,
                 shape=Box(length=self.package_length, width=self.package_width),
                 color=Color.RED,
@@ -370,7 +371,8 @@ class Scenario(BaseScenario):
         # TODO(Kevin): double-check that agent_collision_rew works across all agents (and we're not just logging 1 agent's penalties)
         return {"dist_to_goal": dist_to_goal, "dist_to_pkg": dist_to_pkg, "success_rate": success_rate,
                 "curiosity_state": self.curiosity_state(agent),
-                "agent_collision_rew": agent.agent_collision_rew}
+                "agent_collision_rew": agent.agent_collision_rew,
+                "environment_state": self.environment_state(agent)}
 
     def get_capability_repr(self, agent: Agent):
         """
@@ -511,6 +513,19 @@ class Scenario(BaseScenario):
 
         capability_repr = self.get_capability_repr(agent)
 
+        return capability_repr
+
+    def default_observation(self, agent: Agent):
+        # get positions of all entities in this agent's reference frame
+
+        package_obs = []
+        for package in self.packages:
+            package_obs.append(package.state.pos - package.goal.state.pos)
+            package_obs.append(package.state.pos - agent.state.pos)
+            package_obs.append(package.state.vel)
+            package_obs.append(package.on_goal.unsqueeze(-1))
+
+        capability_repr = self.get_capability_repr(agent)
         return torch.cat(
             [
                 agent.state.pos,
@@ -525,6 +540,53 @@ class Scenario(BaseScenario):
             return self.partial_observation(agent)
         else:
             return self.default_observation(agent)
+    
+    def environment_state(self, agent: Agent):
+        """Generate the state of the entire environment. Typically used for the critic network.
+        This is not meant to be the agent's observation since it contains privledged information."""
+
+        # only compute for the first agent. save to self.env_state
+        is_first_agent = (agent == self.world.agents[0])
+        if is_first_agent:
+
+            # package information
+            package_obs = []
+            for i, package in enumerate(self.packages):
+                package_dist_from_goal_at_start = self.package_starting_dists[i]
+                package_dist_to_goal = torch.linalg.vector_norm(package.state.pos - package.goal.state.pos, dim=1)
+                
+                package_obs += [
+                    # package_dist_from_goal_at_start,
+                    package.state.pos,
+                    package.state.rot,
+                    package.state.vel,
+                    package_dist_to_goal.unsqueeze(-1),
+                    package.goal.state.pos
+                ]
+            
+            # agent information
+            agent_related_obs = []
+            for j, agent in enumerate(self.world.agents):
+
+                # package_to_agent state info
+                for package in self.packages:
+                    package_dist_to_agent = torch.linalg.vector_norm(package.state.pos - agent.state.pos, dim=1)
+                    package_to_agent_state_diff = package.state.pos - agent.state.pos
+                    
+                    agent_related_obs += [
+                        package_dist_to_agent.unsqueeze(-1),
+                        package_to_agent_state_diff
+                    ]
+                
+                capability_repr = self.get_capability_repr(agent)
+                agent_related_obs += [
+                    agent.state.pos,
+                    agent.state.rot,
+                    agent.state.vel,
+                ] + capability_repr + package_obs
+                
+                self.env_state = torch.cat(agent_related_obs, dim=-1)
+        return self.env_state
 
     def curiosity_state(self, agent: Agent):
         """Curiosity state used for Random Netwok Distillation intrinsic
