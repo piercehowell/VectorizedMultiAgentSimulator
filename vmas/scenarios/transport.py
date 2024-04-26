@@ -27,6 +27,7 @@ class Scenario(BaseScenario):
         self.n_packages = kwargs.get("n_packages", 1)
         self.package_width = kwargs.get("package_width", 0.15)
         self.package_length = kwargs.get("package_length", 0.15)
+        self.package_rotatable = kwargs.get("package_rotatable", True)
 
         # partial obs
         self.partial_observations = kwargs.get("partial_observations", True)
@@ -117,7 +118,7 @@ class Scenario(BaseScenario):
                 name=f"package {i}",
                 collide=True,
                 movable=True,
-                rotatable=True,
+                rotatable=self.package_rotatable,
                 mass=self.package_mass,
                 shape=Box(length=self.package_length, width=self.package_width),
                 color=Color.RED,
