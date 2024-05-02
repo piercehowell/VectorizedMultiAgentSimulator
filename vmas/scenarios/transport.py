@@ -62,7 +62,7 @@ class Scenario(BaseScenario):
         # if passed in, we will use an "eval seed" independent of the training seed for VMAS only
         self.eval_seed = kwargs.get("eval_seed", None)
 
-        n_agents = kwargs.get("n_agents", 4)
+        n_agents = kwargs.get("n_agents", 2)
 
         # general world settings
         self.world_semidim = kwargs.get("world_semidim", 1.0) # m
@@ -70,24 +70,24 @@ class Scenario(BaseScenario):
         # TODO: real turtlebots don't seem to be able to accelerate backwards well
         # shift distribution of linear actions to + only?
         self.default_agent_max_linear_vel = kwargs.get("default_agent_max_linear_vel", 0.46) # m/s
-        self.default_agent_max_angular_vel = kwargs.get("default_agent_max_angular_vel", 1.9) # rad/s
+        self.default_agent_max_angular_vel = kwargs.get("default_agent_max_angular_vel", 0.3) # rad/s
         self.default_agent_mass = kwargs.get("default_agent_mass", 3.9) # kg
 
         # packages
         self.n_packages = kwargs.get("n_packages", 1)
-        self.package_width = kwargs.get("package_width", 0.15)
-        self.package_length = kwargs.get("package_length", 0.15)
+        self.package_width = kwargs.get("package_width", 0.4)   
+        self.package_length = kwargs.get("package_length", 0.4)
         self.package_rotatable = kwargs.get("package_rotatable", True)
-        self.package_mass = kwargs.get("package_mass", 10)
+        self.package_mass = kwargs.get("package_mass", 3)
 
         # partial obs
-        self.partial_observations = kwargs.get("partial_observations", True)
+        self.partial_observations = kwargs.get("partial_observations", False)
         self.package_observation_radius = kwargs.get("package_observation_radius", 0.35)
 
         # realism
-        self.linear_friction = kwargs.get("linear_friction", 0.1)
-        self.angular_friction = kwargs.get("angular_friction", 0.1)
-        self.drag = kwargs.get("drag", 0.0)
+        self.linear_friction = kwargs.get("linear_friction", 0.01)
+        self.angular_friction = kwargs.get("angular_friction", 0.01)
+        self.drag = kwargs.get("drag", 0.25)
         # TODO: implement automated domain randomization here?
 
         # rewards
@@ -100,6 +100,8 @@ class Scenario(BaseScenario):
 
         self.add_dense_reward = kwargs.get("add_dense_reward", True)
         self.package_on_goal_reward_factor = kwargs.get("package_on_goal_reward_factor", 1.0)
+        self.agent_touching_package_reward_factor = kwargs.get("agent_touching_package_reward_factor", 0.0)
+        self.time_penalty = kwargs.get("time_penalty", 0.0)
 
         # capabilities
         self.capability_mult_range = kwargs.get("capability_mult_range", [0.5, 2])
@@ -140,9 +142,10 @@ class Scenario(BaseScenario):
             agent = Agent(
                 name=f"agent_{i}", 
                 u_multiplier=[max_linear_vel, max_angular_vel],
+                u_range=[1,1],
                 shape=Sphere(radius),
                 mass=mass,
-                dynamics=DiffDrive(world),
+                dynamics=DiffDrive(world, integration="rk4"),
                 render_action=True,
             )
             agent.agent_collision_rew = torch.zeros(batch_dim, device=device)
@@ -285,6 +288,7 @@ class Scenario(BaseScenario):
     def reward(self, agent: Agent):
         # rewards under is_first only need to be applied once
         is_first = agent == self.world.agents[0]
+        _time_penalty = 0
         if is_first:
             self.rew = torch.zeros(
                 self.world.batch_dim, device=self.world.device, dtype=torch.float32
@@ -316,7 +320,7 @@ class Scenario(BaseScenario):
                 # positive reward when the agent achieves the goal
                 self.rew[package.on_goal] += 1.0 * self.package_on_goal_reward_factor
                 
-
+            _time_penalty += self.time_penalty
             # penalty (negative rew) for agent-agent collisions
             for a in self.world.agents:
                 a.agent_collision_rew[:] = 0
@@ -338,12 +342,10 @@ class Scenario(BaseScenario):
         if self.add_dense_reward:
             for i, package in enumerate(self.packages):
                 dist_to_pkg = torch.linalg.vector_norm(agent.state.pos - package.state.pos, dim=-1)
-                # any small distance gets "floored"
-                # dist_to_pkg[dist_to_pkg < 0.1] = 0.1
+                agent_touching_package=self.world.is_overlapping(package, agent)
+                self.rew += (-dist_to_pkg * self.agent_package_dist_reward_factor) + self.agent_touching_package_reward_factor * agent_touching_package
 
-                self.rew += -dist_to_pkg * self.agent_package_dist_reward_factor
-
-        return self.rew + agent.agent_collision_rew
+        return self.rew + agent.agent_collision_rew + _time_penalty
     
     def info(self, agent: Agent):
         """
@@ -487,27 +489,14 @@ class Scenario(BaseScenario):
 
         package_obs = []
         for package in self.packages:
-            package_obs.append(package.state.pos - package.goal.state.pos)
-            # NOTE: this is the raw observed rotation, rather than relative to goal rotation (since we don't care at what angle  the pkg gets to goal)
-            package_obs.append(package.state.rot)
-            package_obs.append(package.state.pos - agent.state.pos)
-            package_obs.append(package.state.vel)
-            package_obs.append(package.state.ang_vel)
-            package_obs.append(package.on_goal.unsqueeze(-1))
-
-        capability_repr = self.get_capability_repr(agent)
-
-        return capability_repr
-
-    def default_observation(self, agent: Agent):
-        # get positions of all entities in this agent's reference frame
-
-        package_obs = []
-        for package in self.packages:
+            # agent_touching_package=self.world.is_overlapping(package, agent)
+            # package_obs.append(agent_touching_package)
             package_obs.append(package.state.pos - package.goal.state.pos)
             package_obs.append(package.state.pos - agent.state.pos)
+            package_obs.append(package.state.pos)
             package_obs.append(package.state.vel)
             package_obs.append(package.on_goal.unsqueeze(-1))
+            package_obs.append(package.goal.state.pos)
 
         capability_repr = self.get_capability_repr(agent)
         return torch.cat(
