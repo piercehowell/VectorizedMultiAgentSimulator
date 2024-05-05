@@ -98,6 +98,12 @@ class Scenario(BaseScenario):
         self.interagent_collision_penalty = kwargs.get("interagent_collision_penalty", -1)
         assert self.interagent_collision_penalty <= 0, f"self.interagent_collision_penalty must be <= 0, current value is {self.interagent_collision_penalty}!"
 
+        # penalty for high agent angular velocity
+        # https://dl.acm.org/doi/pdf/10.5555/3491440.3492023
+        self.high_ang_vel_penalty = kwargs.get("high_ang_vel_penalty", -1)
+        assert self.high_ang_vel_penalty <= 0, f"self.high_ang_vel_penalty must be <= 0, current value is {self.high_ang_vel_penalty}!"
+        self.high_ang_vel_thresh = kwargs.get("high_ang_vel_thresh", 0.3)
+
         self.add_dense_reward = kwargs.get("add_dense_reward", True)
         self.package_on_goal_reward_factor = kwargs.get("package_on_goal_reward_factor", 1.0)
 
@@ -342,6 +348,11 @@ class Scenario(BaseScenario):
                 # dist_to_pkg[dist_to_pkg < 0.1] = 0.1
 
                 self.rew += -dist_to_pkg * self.agent_package_dist_reward_factor
+
+        # penalize for high angular vel
+        norm_ang_vel = torch.linalg.vector_norm(agent.state.ang_vel, dim=-1)
+        norm_ang_vel[norm_ang_vel < self.high_ang_vel_thresh] = 0
+        self.rew += self.high_ang_vel_penalty * norm_ang_vel
 
         return self.rew + agent.agent_collision_rew
     
