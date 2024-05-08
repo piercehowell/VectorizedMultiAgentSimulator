@@ -494,7 +494,9 @@ class Scenario(BaseScenario):
             package_obs.append(package.state.pos - package.goal.state.pos)
             package_obs.append(package.state.pos - agent.state.pos)
             package_obs.append(package.state.pos)
+            package_obs.append(package.state.rot)
             package_obs.append(package.state.vel)
+            package_obs.append(package.state.ang_vel)
             package_obs.append(package.on_goal.unsqueeze(-1))
             package_obs.append(package.goal.state.pos)
 
