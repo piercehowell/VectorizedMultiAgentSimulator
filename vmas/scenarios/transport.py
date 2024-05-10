@@ -85,9 +85,11 @@ class Scenario(BaseScenario):
         self.package_observation_radius = kwargs.get("package_observation_radius", 0.35)
 
         # realism
-        self.linear_friction = kwargs.get("linear_friction", 0.01)
-        self.angular_friction = kwargs.get("angular_friction", 0.01)
+        self.linear_friction = kwargs.get("linear_friction", 0.0)
+        self.angular_friction = kwargs.get("angular_friction", 0.0)
         self.drag = kwargs.get("drag", 0.25)
+        self.obs_noise = kwargs.get("obs_noise", 0.0)
+        self.u_noise = kwargs.get("u_noise", 0.0)
         # TODO: implement automated domain randomization here?
 
         # rewards
@@ -147,6 +149,8 @@ class Scenario(BaseScenario):
                 mass=mass,
                 dynamics=DiffDrive(world, integration="rk4"),
                 render_action=True,
+                obs_noise=self.obs_noise,
+                u_noise=self.u_noise,
             )
             agent.agent_collision_rew = torch.zeros(batch_dim, device=device)
 
@@ -513,6 +517,7 @@ class Scenario(BaseScenario):
         )
     
     def observation(self, agent: Agent):
+        # TODO: implement obs noise here, see line_trajectory.py:104
         if self.partial_observations:
             return self.partial_observation(agent)
         else:
