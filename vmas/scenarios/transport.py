@@ -377,7 +377,8 @@ class Scenario(BaseScenario):
         return {"dist_to_goal": dist_to_goal, "dist_to_pkg": dist_to_pkg, "success_rate": success_rate,
                 "curiosity_state": self.curiosity_state(agent),
                 "agent_collision_rew": agent.agent_collision_rew,
-                "environment_state": self.environment_state(agent)}
+                "environment_state": self.environment_state(agent),
+                "environment_state_no_cap": self.environment_state(agent, capability_aware=False)}
 
     def get_capability_repr(self, agent: Agent):
         """
@@ -518,7 +519,7 @@ class Scenario(BaseScenario):
         else:
             return self.default_observation(agent)
     
-    def environment_state(self, agent: Agent):
+    def environment_state(self, agent: Agent, capability_aware: bool = False):
         """Generate the state of the entire environment. Typically used for the critic network.
         This is not meant to be the agent's observation since it contains privledged information."""
 
@@ -555,7 +556,7 @@ class Scenario(BaseScenario):
                         package_to_agent_state_diff
                     ]
                 
-                capability_repr = self.get_capability_repr(agent)
+                capability_repr = self.get_capability_repr(agent) if capability_aware else []
                 agent_related_obs += [
                     agent.state.pos,
                     agent.state.rot,
