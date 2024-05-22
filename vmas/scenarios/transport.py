@@ -82,7 +82,7 @@ class Scenario(BaseScenario):
 
         # partial obs
         self.partial_observations = kwargs.get("partial_observations", True)
-        selfpackage_observation_dist = kwargs.get("package_observation_radius", 0.35)
+        self.package_observation_dist = kwargs.get("package_observation_dist", 0.35)
 
         # realism
         self.linear_friction = kwargs.get("linear_friction", 0.01)
@@ -159,8 +159,7 @@ class Scenario(BaseScenario):
                     Landmark(
                         name=f'obs_sensor_agent_{i}',
                         collide=False,
-                        
-                        shape=Sphere(radius=selfpackage_observation_dist+radius),
+                        shape=Sphere(radius=self.package_observation_dist+radius),
                         color=(0.827, 0.827, 0.827, 0.65),
                         movable=False,
                     )
@@ -207,7 +206,7 @@ class Scenario(BaseScenario):
         # only do this during batched resets!
         if not env_index:        
             capabilities = [] # save capabilities for relative capabilities later
-            for agent in self.world.agents:
+            for i, agent in enumerate(self.world.agents):
                 max_linear_vel = self.default_agent_max_linear_vel * random.uniform(self.capability_mult_min, self.capability_mult_max)
                 max_angular_vel = self.default_agent_max_angular_vel * random.uniform(self.capability_mult_min, self.capability_mult_max)
                 radius = self.default_agent_radius * random.uniform(self.capability_mult_min, self.capability_mult_max)
@@ -218,6 +217,12 @@ class Scenario(BaseScenario):
                 agent.u_multiplier=[max_linear_vel, max_angular_vel]
                 agent.shape=Sphere(radius)
                 agent.mass=mass
+
+                # spawn the sensor radius for each agent
+                if self.partial_observations:
+                    self.observation_sensors[i].set_pos(self.world.agents[i].state.pos, env_index)
+                    self.observation_sensors[i].shape = Sphere(self.package_observation_dist+radius)
+        
 
             self.capabilities = torch.tensor(capabilities)
 
@@ -273,11 +278,6 @@ class Scenario(BaseScenario):
             occupied_positions=package_occupied_pos,
         )
 
-        # spawn the sensor radius for each agent
-        if self.partial_observations:
-            for i, agent_i_sensor in enumerate(self.observation_sensors):
-                agent_i_sensor.set_pos(self.world.agents[i].state.pos, env_index)
-        
         self.package_starting_dists = []
         self.og_package_positions = []
         for i, package in enumerate(self.packages):
