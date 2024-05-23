@@ -325,7 +325,7 @@ class Environment(TorchVectorizedObject):
             return spaces.Tuple(
                 [
                     self.get_agent_environment_state_space(
-                        agent, self.scenario.environment_state(agent)
+                        agent, *self.scenario.environment_state(agent)
                     )
                 ]
             )
@@ -333,7 +333,7 @@ class Environment(TorchVectorizedObject):
             return spaces.Dict(
                 {
                     agent.name: self.get_agent_environment_state_space(
-                        agent, self.scenario.environment_state(agent)
+                        agent, *self.scenario.environment_state(agent)
                     )
                 }
             )
@@ -421,12 +421,12 @@ class Environment(TorchVectorizedObject):
                 f"Invalid type of curiosity_state {obs} for agent {agent.name}"
             )
         
-    def get_agent_environment_state_space(self, agent: Agent, obs: AGENT_OBS_TYPE):
-        if isinstance(obs, Tensor):
+    def get_agent_environment_state_space(self, agent: Agent, obs_1: AGENT_OBS_TYPE, obs_2: AGENT_OBS_TYPE):
+        if isinstance(obs_1, Tensor):
             return spaces.Box(
                 low=-np.float32("inf"),
                 high=np.float32("inf"),
-                shape=(len(obs[0]),),
+                shape=(len(obs_1[0]),len(obs_2[0])),
                 dtype=np.float32,
             )
         elif isinstance(obs, Dict):
