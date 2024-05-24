@@ -70,6 +70,9 @@ class Scenario(BaseScenario):
 
         assert self.n_passages == 3 or self.n_passages == 4
 
+        # NOTE: I changed how our VMAS viewer works s.t. it requires a world_semidim, my bad
+        self.world_semidim = 1.0
+
         self.plot_grid = False
 
         # Make world
@@ -509,6 +512,20 @@ class Scenario(BaseScenario):
             agent.state.pos - self.small_passage_pos,
             angle_to_vector(self.goal.state.rot),
         ] + ([angle_to_vector(joint_angle)] if self.observe_joint_angle else [])
+
+        # NOTE: I add the size capability in "mixed" form manually here:
+        radius = agent.shape.radius
+        mean_radius = (self.agent_radius + self.agent_radius_2) / 2
+        relative_radius = agent.shape.radius - mean_radius
+        capability_repr = [
+            torch.tensor(
+                radius, device=self.world.device
+            ).repeat(self.world.batch_dim, 1),
+            torch.tensor(
+                relative_radius, device=self.world.device
+            ).repeat(self.world.batch_dim, 1),
+        ]
+        observations += capability_repr
 
         if self.obs_noise > 0:
             for i, obs in enumerate(observations):
