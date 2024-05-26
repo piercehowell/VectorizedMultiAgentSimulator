@@ -54,7 +54,8 @@ class Scenario(BaseScenario):
         self.n_agents = kwargs.get("n_agents", 3)
         self.package_mass = kwargs.get("package_mass", 5)
         self.random_package_pos_on_line = kwargs.get("random_package_pos_on_line", True)
-        self.world_semidim = 1
+        self.world_semidim = kwargs.get("world_semidim", 1.0)
+        self.gravity = kwargs.get("gravity", -0.05)
         self.eval_seed = kwargs.get("eval_seed", None)
 
         # capabilities
@@ -62,7 +63,12 @@ class Scenario(BaseScenario):
         self.capability_mult_min = self.capability_mult_range[0]
         self.capability_mult_max = self.capability_mult_range[1]
         self.capability_representation = kwargs.get("capability_representation", "raw")
-        self.default_u_multiplier = 0.7
+        self.default_u_multiplier = kwargs.get("default_u_multiplier", 0.7)
+        self.default_agent_radius = kwargs.get("default_agent_radius", 0.03)
+        self.default_agent_mass = kwargs.get("default_agent_mass", 1)
+
+        # metrics
+        self.success_rate = None
 
         # rng
         rng_state = None
@@ -73,24 +79,24 @@ class Scenario(BaseScenario):
         assert self.n_agents > 1
 
         self.line_length = 0.8
-        self.agent_radius = 0.03
 
         self.shaping_factor = 100
         self.fall_reward = -10
 
         # Make world
-        world = World(batch_dim, device, gravity=(0.0, -0.05), y_semidim=self.world_semidim)
+        world = World(batch_dim, device, gravity=(0.0, self.gravity), y_semidim=self.world_semidim)
         # Add agents
         capabilities = [] # save capabilities for relative capabilities later
         for i in range(self.n_agents):
             max_u = self.default_u_multiplier * random.uniform(self.capability_mult_min, self.capability_mult_max)
-            # radius = self.default_agent_radius * random.uniform(self.capability_mult_min, self.capability_mult_max)
-            # mass = self.default_agent_mass * random.uniform(self.capability_mult_min, self.capability_mult_max)
+            radius = self.default_agent_radius * random.uniform(self.capability_mult_min, self.capability_mult_max)
+            mass = self.default_agent_mass * random.uniform(self.capability_mult_min, self.capability_mult_max)
 
             agent = Agent(
                 name=f"agent_{i}",
-                shape=Sphere(self.agent_radius),
+                shape=Sphere(radius),
                 u_multiplier=max_u,
+                mass=mass,
                 render_action=True,
             )
             capabilities.append([max_u, agent.shape.radius, agent.mass])
@@ -155,14 +161,15 @@ class Scenario(BaseScenario):
             capabilities = [] # save capabilities for relative capabilities later
             for agent in self.world.agents:
                 max_u = self.default_u_multiplier * random.uniform(self.capability_mult_min, self.capability_mult_max)
-                # radius = self.default_agent_radius * random.uniform(self.capability_mult_min, self.capability_mult_max)
-                # mass = self.default_agent_mass * random.uniform(self.capability_mult_min, self.capability_mult_max)
+                radius = self.default_agent_radius * random.uniform(self.capability_mult_min, self.capability_mult_max)
+                mass = self.default_agent_mass * random.uniform(self.capability_mult_min, self.capability_mult_max)
 
-                capabilities.append([max_u, agent.shape.radius, agent.mass])
+                # capabilities.append([max_u, agent.shape.radius, agent.mass])
+                capabilities.append([max_u, radius, mass])
 
                 agent.u_multiplier=max_u
-                # agent.shape=Sphere(radius)
-                # agent.mass=mass
+                agent.shape=Sphere(radius)
+                agent.mass=mass
 
             self.capabilities = torch.tensor(capabilities)
 
@@ -199,7 +206,7 @@ class Scenario(BaseScenario):
                 ),
                 torch.full(
                     (1, 1) if env_index is not None else (self.world.batch_dim, 1),
-                    -self.world.y_semidim + self.agent_radius * 2,
+                    -self.world.y_semidim + self.default_agent_radius * self.capability_mult_max * 2,
                     device=self.world.device,
                     dtype=torch.float32,
                 ),
@@ -239,7 +246,7 @@ class Scenario(BaseScenario):
                         + i
                         * (self.line_length - agent.shape.radius)
                         / (self.n_agents - 1),
-                        -self.agent_radius * 2,
+                        -agent.shape.radius * 2,
                     ],
                     device=self.world.device,
                     dtype=torch.float32,
@@ -270,7 +277,7 @@ class Scenario(BaseScenario):
                     0,
                     -self.world.y_semidim
                     - self.floor.shape.width / 2
-                    - self.agent_radius,
+                    - self.default_agent_radius * self.capability_mult_max,
                 ],
                 device=self.world.device,
             ),
@@ -395,7 +402,10 @@ class Scenario(BaseScenario):
         )
 
     def info(self, agent: Agent):
-        info = {"pos_rew": self.pos_rew, "ground_rew": self.ground_rew}
+        self.success_rate = self.world.is_overlapping(
+            self.package, self.package.goal
+        )
+        info = {"pos_rew": self.pos_rew, "ground_rew": self.ground_rew, "success_rate": self.success_rate}
         return info
 
 
