@@ -22,46 +22,7 @@ if typing.TYPE_CHECKING:
 
 
 class Scenario(BaseScenario):
-    def get_rng_state(self, device):
-        """
-        Returns a tuple of the form
-        (numpy random state, python's random state, torch's random state, torch.cuda's random state)
-        """
-        np_rng_state = np.random.get_state()
-        py_rng_state = random.getstate()
-        torch_rng_state = torch.get_rng_state()
-        torch_cuda_rng_state = torch.cuda.get_rng_state(device)
-
-        return (np_rng_state, py_rng_state, torch_rng_state, torch_cuda_rng_state)
-
-    def set_eval_seed(self, eval_seed):
-        """
-        Set a new seed for numpy, python.random, torch.random, and torch.cuda.random.
-
-        Intended to be used only with eval_seed + wrapped by get/set_rng_state().
-        """
-        torch.manual_seed(self.eval_seed)
-        torch.cuda.manual_seed_all(self.eval_seed)
-        random.seed(self.eval_seed)
-        np.random.seed(self.eval_seed)
-
-    def set_rng_state(self, old_rng_state, device):
-        """
-        Restore the prior RNG state (based on the return value of get_rng_state).
-        """
-        assert old_rng_state is not None, "set_rng_state() must be called with the return value of get_rng_state()!"
-
-        np_rng_state, py_rng_state, torch_rng_state, torch_cuda_rng_state = old_rng_state 
-
-        np.random.set_state(np_rng_state)
-        random.setstate(py_rng_state)
-        torch.set_rng_state(torch_rng_state)
-        torch.cuda.set_rng_state(torch_cuda_rng_state, device)
-
     def make_world(self, batch_dim: int, device: torch.device, **kwargs):
-        # if passed in, we will use an "eval seed" independent of the training seed for VMAS only
-        self.eval_seed = kwargs.get("eval_seed", None)
-
         n_agents = kwargs.get("n_agents", 2)
 
         # general world settings
@@ -108,11 +69,6 @@ class Scenario(BaseScenario):
         self.capability_mult_min = self.capability_mult_range[0]
         self.capability_mult_max = self.capability_mult_range[1]
         self.capability_representation = kwargs.get("capability_representation", "raw")
-
-        rng_state = None
-        if self.eval_seed:
-            rng_state = self.get_rng_state(device)
-            self.set_eval_seed(self.eval_seed)
 
         # Make world
         world = World(
@@ -177,17 +133,9 @@ class Scenario(BaseScenario):
             self.packages.append(package)
             world.add_landmark(package)
 
-        if self.eval_seed:
-            self.set_rng_state(rng_state, device)
-
         return world
 
     def reset_world_at(self, env_index: int = None):
-        rng_state = None
-        if self.eval_seed:
-            rng_state = self.get_rng_state(self.world.device)
-            self.set_eval_seed(self.eval_seed)
-
         # only do this during batched resets!
         if not env_index:        
             capabilities = [] # save capabilities for relative capabilities later
@@ -281,9 +229,6 @@ class Scenario(BaseScenario):
                     )
                     * self.package_goal_dist_reward_factor
                 )
-
-        if self.eval_seed:
-            self.set_rng_state(rng_state, self.world.device)
 
     def reward(self, agent: Agent):
         # rewards under is_first only need to be applied once
