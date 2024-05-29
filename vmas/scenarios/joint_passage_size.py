@@ -46,6 +46,7 @@ def get_line_angle_dist_0_180(angle, goal):
         ),
     ).squeeze(-1)
 
+
 class Scenario(BaseScenario):
     def make_world(self, batch_dim: int, device: torch.device, **kwargs):
         self.fixed_passage = kwargs.get("fixed_passage", False)
@@ -58,7 +59,6 @@ class Scenario(BaseScenario):
         self.mass_ratio = kwargs.get("mass_ratio", 1)
         self.mass_position = kwargs.get("mass_position", 0.75)
         self.max_speed_1 = kwargs.get("max_speed_1", None)  # 0.1
-        self.agent_pos_shaping_factor = kwargs.get("agent_pos_shaping_factor", 1)
         self.pos_shaping_factor = kwargs.get("pos_shaping_factor", 1)
         self.rot_shaping_factor = kwargs.get("rot_shaping_factor", 0)
         self.collision_reward = kwargs.get("collision_reward", -0.1)
@@ -200,7 +200,6 @@ class Scenario(BaseScenario):
         self.rot_rew = self.pos_rew.clone()
         self.collision_rew = self.pos_rew.clone()
         self.energy_rew = self.pos_rew.clone()
-        self.agent_pos_rew = self.pos_rew.clone()
         self.all_passed = torch.full((batch_dim,), False, device=device)
 
         return world
@@ -216,13 +215,6 @@ class Scenario(BaseScenario):
         del self.world._landmarks[-self.n_boxes :]
         self.create_passage_map(self.world)
         self.reset_world_at()
-
-    def agent_dist_to_goal(self, agent_index):
-        agent = self.world.agents[agent_index]
-        agent_goal = (self.goal.state.pos - self.joint_length / 2) if agent_index == 0 else (self.goal.state.pos + self.joint_length / 2)
-        return torch.linalg.vector_norm(
-            agent.state.pos - agent_goal, dim=1
-        )
 
     def reset_world_at(self, env_index: int = None):
         start_angle = torch.rand(
@@ -362,10 +354,6 @@ class Scenario(BaseScenario):
                 )
             ) * self.rot_shaping_factor
 
-            # these variables allow "previous state" - "curr state" so that 
-            # the reward is only relative to previous state
-            self.prev_agent_dist_shaping = (self.agent_dist_to_goal(0) + self.agent_dist_to_goal(1)) * self.agent_pos_shaping_factor
-
         else:
             self.t[env_index] = 0
             self.passed[env_index] = 0
@@ -408,7 +396,6 @@ class Scenario(BaseScenario):
             self.rot_rew[:] = 0
             self.collision_rew[:] = 0
             self.energy_rew[:] = 0
-            self.agent_pos_rew[:] = 0
 
             joint_passed = self.joint.landmark.state.pos[:, Y] > 0
             self.all_passed = (
@@ -429,16 +416,15 @@ class Scenario(BaseScenario):
             ]
             self.joint.pos_shaping_pre = joint_shaping
 
-            # 0 reward for joint center to goal
-            # joint_dist_to_goal = torch.linalg.vector_norm(
-            #     self.joint.landmark.state.pos - self.goal.state.pos,
-            #     dim=1,
-            # )
-            # joint_shaping = joint_dist_to_goal * self.pos_shaping_factor
-            # self.pos_rew[joint_passed] += (self.joint.pos_shaping_post - joint_shaping)[
-            #     joint_passed
-            # ]
-            # self.joint.pos_shaping_post = joint_shaping
+            joint_dist_to_goal = torch.linalg.vector_norm(
+                self.joint.landmark.state.pos - self.goal.state.pos,
+                dim=1,
+            )
+            joint_shaping = joint_dist_to_goal * self.pos_shaping_factor
+            self.pos_rew[joint_passed] += (self.joint.pos_shaping_post - joint_shaping)[
+                joint_passed
+            ]
+            self.joint.pos_shaping_post = joint_shaping
 
             # Rot shaping
             joint_dist_to_90_rot = (
@@ -450,10 +436,8 @@ class Scenario(BaseScenario):
                     self.joint.landmark.state.rot, self.middle_angle
                 )
             )
-            # only apply before passage
             joint_shaping = joint_dist_to_90_rot * self.rot_shaping_factor
-            self.rot_rew[~joint_passed] += (self.joint.rot_shaping_pre -
-                                            joint_shaping)[~joint_passed]
+            self.rot_rew += self.joint.rot_shaping_pre - joint_shaping
             self.joint.rot_shaping_pre = joint_shaping
 
             # Agent collisions
@@ -485,18 +469,8 @@ class Scenario(BaseScenario):
                 ).sum(-1)
                 self.energy_rew = -self.energy_expenditure * self.energy_reward_coeff
 
-            # shaping for the agents to land on their spots
-            # only apply this after both agents are past the passage
-            both_agents_past = torch.logical_and(self.world.agents[0].state.pos[:, Y] > 0, self.world.agents[1].state.pos[:, Y] > 0)
-            curr_agent_dist_shaping = (self.agent_dist_to_goal(0) + self.agent_dist_to_goal(1)) * self.agent_pos_shaping_factor
-            # self.agent_pos_rew += self.prev_agent_dist_shaping - curr_agent_dist_shaping
-            self.agent_pos_rew[both_agents_past] += (self.prev_agent_dist_shaping - curr_agent_dist_shaping)[
-                both_agents_past
-            ]
-            self.prev_agent_dist_shaping = curr_agent_dist_shaping
-
             self.rew = (
-                self.pos_rew + self.rot_rew + self.collision_rew + self.energy_rew + self.agent_pos_rew
+                self.pos_rew + self.rot_rew + self.collision_rew + self.energy_rew
             )
 
         return self.rew
@@ -591,7 +565,6 @@ class Scenario(BaseScenario):
             just_passed = self.all_passed * (self.passed == 0)
             self.passed[just_passed] = 100
             self.info_stored = {
-                "agent_pos_rew": self.agent_pos_rew,
                 "pos_rew": self.pos_rew,
                 "rot_rew": self.rot_rew,
                 "collision_rew": self.collision_rew,
@@ -787,7 +760,7 @@ class Scenario(BaseScenario):
 
         goal_agent_1.set_color(*color)
         geoms.append(goal_agent_1)
-        goal_agent_2 = rendering.make_circle(3 * self.agent_radius)
+        goal_agent_2 = rendering.make_circle(self.agent_radius)
         xform = rendering.Transform()
         goal_agent_2.add_attr(xform)
         xform.set_translation(
