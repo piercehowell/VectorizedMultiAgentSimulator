@@ -325,7 +325,7 @@ class Environment(TorchVectorizedObject):
             return spaces.Tuple(
                 [
                     self.get_agent_environment_state_space(
-                        agent, self.scenario.environment_state(agent)
+                        agent, *self.scenario.environment_state(agent)
                     )
                 ]
             )
@@ -333,7 +333,7 @@ class Environment(TorchVectorizedObject):
             return spaces.Dict(
                 {
                     agent.name: self.get_agent_environment_state_space(
-                        agent, self.scenario.environment_state(agent)
+                        agent, *self.scenario.environment_state(agent)
                     )
                 }
             )
@@ -421,21 +421,30 @@ class Environment(TorchVectorizedObject):
                 f"Invalid type of curiosity_state {obs} for agent {agent.name}"
             )
         
-    def get_agent_environment_state_space(self, agent: Agent, obs: AGENT_OBS_TYPE):
-        if isinstance(obs, Tensor):
-            return spaces.Box(
-                low=-np.float32("inf"),
-                high=np.float32("inf"),
-                shape=(len(obs[0]),),
-                dtype=np.float32,
-            )
-        elif isinstance(obs, Dict):
-            return spaces.Dict(
-                {
-                    key: self.get_agent_environment_state_space(agent, value)
-                    for key, value in obs.items()
-                }
-            )
+    def get_agent_environment_state_space(self, agent: Agent, agent_state: AGENT_OBS_TYPE, global_state: AGENT_OBS_TYPE):
+        
+        if isinstance(agent_state, Tensor):
+            return spaces.Tuple([
+                spaces.Box(
+                    low=-np.float32("inf"),
+                    high=np.float32("inf"),
+                    shape=(len(agent_state[0]),),
+                    dtype=np.float32,
+                    ),
+                spaces.Box(
+                    low=-np.float32("inf"),
+                    high=np.float32("inf"),
+                    shape=(len(global_state[0]),),
+                    dtype=np.float32,
+                    )])
+        # NOTE USED, PROBABLY EVER.
+        # elif isinstance(agent_state, Dict):
+        #     return spaces.Dict(
+        #         {
+        #             key: self.get_agent_environment_state_space(agent, value)
+        #             for key, value in obs.items()
+        #         }
+        #     )
         else:
             raise NotImplementedError(
                 f"Invalid type of environment_state {obs} for agent {agent.name}"

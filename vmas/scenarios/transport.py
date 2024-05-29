@@ -318,11 +318,13 @@ class Scenario(BaseScenario):
             dim=-1
         ) / len(self.packages)
 
+        agent_centric_environment_states, global_environment_state = self.environment_state(agent)
         # TODO(Kevin): double-check that agent_collision_rew works across all agents (and we're not just logging 1 agent's penalties)
         return {"dist_to_goal": dist_to_goal, "dist_to_pkg": dist_to_pkg, "success_rate": success_rate,
                 "curiosity_state": self.curiosity_state(agent),
                 "agent_collision_rew": agent.agent_collision_rew,
-                "environment_state": self.environment_state(agent)}
+                "agent_centric_environment_states": agent_centric_environment_states,
+                "global_environment_state": global_environment_state}
 
     def get_capability_repr(self, agent: Agent):
         """
@@ -465,50 +467,49 @@ class Scenario(BaseScenario):
     
     def environment_state(self, agent: Agent):
         """Generate the state of the entire environment. Typically used for the critic network.
-        This is not meant to be the agent's observation since it contains privledged information."""
-
-        # only compute for the first agent. save to self.env_state
-        is_first_agent = (agent == self.world.agents[0])
-        if is_first_agent:
-
-            # package information
-            package_obs = []
-            for i, package in enumerate(self.packages):
-                package_dist_from_goal_at_start = self.package_starting_dists[i]
-                package_dist_to_goal = torch.linalg.vector_norm(package.state.pos - package.goal.state.pos, dim=1)
-                
-                package_obs += [
-                    # package_dist_from_goal_at_start,
-                    package.state.pos,
-                    package.state.rot,
-                    package.state.vel,
-                    package_dist_to_goal.unsqueeze(-1),
-                    package.goal.state.pos
-                ]
+        This is not meant to be the agent's observation since it contains privledged information.
+        
+        The environment state is separated into two categories: 1) agent observation state - a priveledge observation
+        for each agent, 2) global environmet state - global privledged environment information agnostic
+        too the perspective of each agent.
+        """
+        package_obs = []
+        for i, package in enumerate(self.packages):
+            package_dist_from_goal_at_start = self.package_starting_dists[i]
+            package_dist_to_goal = torch.linalg.vector_norm(package.state.pos - package.goal.state.pos, dim=1)
             
-            # agent information
-            agent_related_obs = []
-            for j, agent in enumerate(self.world.agents):
+            package_obs += [
+                # package_dist_from_goal_at_start,
+                package.state.pos,
+                package.state.rot,
+                package.state.vel,
+                package_dist_to_goal.unsqueeze(-1),
+                package.goal.state.pos
+            ]
+        
+        global_environment_state = torch.cat(package_obs, dim=-1)
 
-                # package_to_agent state info
-                for package in self.packages:
-                    package_dist_to_agent = torch.linalg.vector_norm(package.state.pos - agent.state.pos, dim=1)
-                    package_to_agent_state_diff = package.state.pos - agent.state.pos
-                    
-                    agent_related_obs += [
-                        package_dist_to_agent.unsqueeze(-1),
-                        package_to_agent_state_diff
-                    ]
-                
-                capability_repr = self.get_capability_repr(agent)
-                agent_related_obs += [
-                    agent.state.pos,
-                    agent.state.rot,
-                    agent.state.vel,
-                ] + capability_repr + package_obs
-                
-                self.env_state = torch.cat(agent_related_obs, dim=-1)
-        return self.env_state
+        # now get agent centric state observations
+        individual_agent_obs = []
+        # package_to_agent state info
+        for package in self.packages:
+            package_dist_to_agent = torch.linalg.vector_norm(package.state.pos - agent.state.pos, dim=1)
+            package_to_agent_state_diff = package.state.pos - agent.state.pos
+            
+            individual_agent_obs += [
+                package_dist_to_agent.unsqueeze(-1),
+                package_to_agent_state_diff
+            ]
+        
+        capability_repr = self.get_capability_repr(agent)
+        individual_agent_obs += [
+            agent.state.pos,
+            agent.state.rot,
+            agent.state.vel,
+        ] + capability_repr
+        
+        agent_centric_environment_states = torch.cat(individual_agent_obs, dim=-1)
+        return agent_centric_environment_states, global_environment_state
 
     def curiosity_state(self, agent: Agent):
         """Curiosity state used for Random Netwok Distillation intrinsic
