@@ -314,7 +314,7 @@ class Scenario(BaseScenario):
                 
                 # positive reward when the agent achieves the goal
                 self.rew[package.on_goal] += 1.0 * self.package_on_goal_reward_factor
-                self.rew[package.on_orientation] += 1.0 * self.package_on_orientation_reward_factor
+                self.rew[torch.logical_and(package.on_orientation, package.on_goal)] += 1.0 * self.package_on_orientation_reward_factor
                 self.rew[torch.logical_and(package.on_goal, package.on_orientation)] += 1.0 * self.task_success_reward_factor
                 
             _time_penalty += self.time_penalty
