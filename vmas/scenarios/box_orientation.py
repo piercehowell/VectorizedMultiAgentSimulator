@@ -20,7 +20,7 @@ import typing
 if typing.TYPE_CHECKING:
     from vmas.simulator.rendering import Geom
 
-def orientation_error(a: torch.Tensor, b: torch.Tensor, eps=1e-3):
+def orientation_error(a: torch.Tensor, b: torch.Tensor, eps=0.174533):
     """calculate the angular error element wise between tensors.
     Expect the input angles to be in range [-pi, pi]"""
     angle_diff = b - a
@@ -68,7 +68,7 @@ class Scenario(BaseScenario):
         self.agent_package_dist_reward_factor = kwargs.get("agent_package_dist_reward_factor", 0.002)
         self.package_goal_dist_reward_factor = kwargs.get("package_goal_dist_reward_factor", 0.1)
         self.package_orientation_reward_factor = kwargs.get("package_orientation_reward_factor", 0.0)
-
+        self.package_on_goal_threshold = kwargs.get("package_on_goal_threshold", 0.08)
         self.min_collision_distance = 0.05 * self.default_agent_radius # default navigation collision dist is 5% of the agent radius
         self.interagent_collision_penalty = kwargs.get("interagent_collision_penalty", 0)
         assert self.interagent_collision_penalty <= 0, f"self.interagent_collision_penalty must be <= 0, current value is {self.interagent_collision_penalty}!"
@@ -176,13 +176,14 @@ class Scenario(BaseScenario):
         if env_index is not None:
             goal.state.pos[env_index] = torch.zeros(goal.state.pos.shape, device=self.world.device)[env_index]
             goal.state.rot[env_index] = torch.tanh(torch.randn_like(goal.state.rot[env_index], device=self.world.device)) * np.pi
+            goal_occupied_pos = torch.stack(
+            [goal.state.pos], dim=1)[env_index].unsqueeze(0)
         elif env_index is None:
             goal.state.pos = torch.zeros(goal.state.pos.shape, device=self.world.device)
             goal.state.rot = torch.tanh(torch.randn_like(goal.state.rot, device=self.world.device)) * np.pi
-        
-        goal_occupied_pos = torch.stack(
-            [goal.state.pos], dim=1
-        )
+            goal_occupied_pos = torch.stack(
+                [goal.state.pos], dim=1
+            )
 
         # then spawn packages randomly around it
         ScenarioUtils.spawn_entities_randomly(
@@ -194,7 +195,7 @@ class Scenario(BaseScenario):
                 for package in self.packages
             ),
             x_bounds=(
-                -self.package_max_dist_from_goal,
+                -self.package_max_dist_from_goal, 
                 self.package_max_dist_from_goal,
             ),
             y_bounds=(
@@ -235,7 +236,7 @@ class Scenario(BaseScenario):
             self.package_starting_dists.append(
                 torch.linalg.vector_norm(package.state.pos - package.goal.state.pos, dim=1)
             )
-
+            package.dist_to_goal = torch.linalg.vector_norm(package.state.pos - package.goal.state.pos, dim=1)
             if env_index is None:
                 package.global_shaping_dist_to_goal = (
                     torch.linalg.vector_norm(
@@ -260,7 +261,8 @@ class Scenario(BaseScenario):
                 angle_error, package.on_orientation = orientation_error(package.state.rot, package.goal.state.rot)
                 package.global_shaping_dist_to_orientation[env_index] = angle_error[env_index] * self.package_orientation_reward_factor
 
-            package.on_goal = self.world.is_overlapping(package, package.goal)
+            # package.on_goal = self.world.is_overlapping(package, package.goal)
+            package.on_goal = package.dist_to_goal < self.package_on_goal_threshold
             
 
     def reward(self, agent: Agent):
@@ -279,7 +281,7 @@ class Scenario(BaseScenario):
                     package.state.pos - package.goal.state.pos, dim=1
                 )
                 
-                package.on_goal = self.world.is_overlapping(package, package.goal)
+                package.on_goal = package.dist_to_goal < self.package_on_goal_threshold
                 package.color = torch.tensor(
                     Color.RED.value, device=self.world.device, dtype=torch.float32
                 ).repeat(self.world.batch_dim, 1)
@@ -337,7 +339,7 @@ class Scenario(BaseScenario):
         if self.add_dense_reward:
             for i, package in enumerate(self.packages):
                 # distance to goal and if agent is touching the box
-                dist_to_pkg = torch.linalg.vector_norm(agent.state.pos - package.state.pos, dim=-1)
+                dist_to_pkg = torch.linalg.vector_norm(agent.state.pos - package.state.pos, dim=-1)- agent.shape.radius - package.shape.circumscribed_radius()
                 # agent_touching_package=self.world.is_overlapping(package, agent)
                 self.rew += (-dist_to_pkg * self.agent_package_dist_reward_factor) # + self.agent_touching_package_reward_factor * agent_touching_package
                 
@@ -362,7 +364,7 @@ class Scenario(BaseScenario):
             dist_to_goal += torch.linalg.vector_norm(
                     package.state.pos - package.goal.state.pos, dim=1
                 ) # - goal.shape.circumscribed_radius()
-            dist_to_pkg += torch.linalg.vector_norm(agent.state.pos - package.state.pos, dim=-1) - agent.shape.radius
+            dist_to_pkg += torch.linalg.vector_norm(agent.state.pos - package.state.pos, dim=-1) - agent.shape.radius - package.shape.circumscribed_radius()
 
             angle_error, _ = orientation_error(package.state.rot, package.goal.state.rot)
             dist_to_orientation += angle_error
