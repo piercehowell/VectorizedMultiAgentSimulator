@@ -20,13 +20,16 @@ import typing
 if typing.TYPE_CHECKING:
     from vmas.simulator.rendering import Geom
 
-def orientation_error(a: torch.Tensor, b: torch.Tensor, eps=1e-2):
+def orientation_error(a: torch.Tensor, b: torch.Tensor, eps=1e-3):
     """calculate the angular error element wise between tensors.
     Expect the input angles to be in range [-pi, pi]"""
-    angle_diff = torch.abs(a - b)
+    angle_diff = b - a
     mask_correct = angle_diff > np.pi
-    angle_diff[mask_correct] = 2*np.pi - angle_diff[mask_correct]
-    on_orientation = angle_diff < eps
+    angle_diff[mask_correct] =  angle_diff[mask_correct] - 2*np.pi
+    mask_correct = angle_diff < -np.pi
+    angle_diff[mask_correct] =  angle_diff[mask_correct] + 2*np.pi
+
+    on_orientation = torch.abs(angle_diff) < eps
     return angle_diff.flatten(), on_orientation.flatten()
 
 class Scenario(BaseScenario):
@@ -39,7 +42,7 @@ class Scenario(BaseScenario):
         self.default_agent_radius = kwargs.get("default_agent_radius", 0.35) # m
         # TODO: real turtlebots don't seem to be able to accelerate backwards well
         # shift distribution of linear actions to + only?
-        self.default_agent_max_linear_vel = kwargs.get("default_agent_max_linear_vel", 1.0) # m/s
+        self.default_agent_max_linear_vel = kwargs.get("default_agent_max_linear_vel", 2.0) # m/s
         self.default_agent_max_angular_vel = kwargs.get("default_agent_max_angular_vel", 0.3) # rad/s
         self.default_agent_mass = kwargs.get("default_agent_mass", 3.9) # kg
 
@@ -62,17 +65,19 @@ class Scenario(BaseScenario):
         # TODO: implement automated domain randomization here?
 
         # rewards
-        self.agent_package_dist_reward_factor = kwargs.get("agent_package_dist_reward_factor", 0.0002)
+        self.agent_package_dist_reward_factor = kwargs.get("agent_package_dist_reward_factor", 0.002)
         self.package_goal_dist_reward_factor = kwargs.get("package_goal_dist_reward_factor", 0.1)
-        self.package_orientation_reward_factor = kwargs.get("package_orientation_reward_factor", 0.1)
+        self.package_orientation_reward_factor = kwargs.get("package_orientation_reward_factor", 0.0)
 
         self.min_collision_distance = 0.05 * self.default_agent_radius # default navigation collision dist is 5% of the agent radius
-        self.interagent_collision_penalty = kwargs.get("interagent_collision_penalty", -1)
+        self.interagent_collision_penalty = kwargs.get("interagent_collision_penalty", 0)
         assert self.interagent_collision_penalty <= 0, f"self.interagent_collision_penalty must be <= 0, current value is {self.interagent_collision_penalty}!"
 
         self.add_dense_reward = kwargs.get("add_dense_reward", True)
-        self.package_on_goal_reward_factor = kwargs.get("package_on_goal_reward_factor", 1.0)
-        self.agent_touching_package_reward_factor = kwargs.get("agent_touching_package_reward_factor", 0.0)
+        self.package_on_goal_reward_factor = kwargs.get("package_on_goal_reward_factor", 2.0)
+        self.agent_touching_package_reward_factor = kwargs.get("agent_touching_package_reward_factor", 0.002)
+        self.package_on_orientation_reward_factor = kwargs.get("package_on_orientation_reward_factor", 0.0002)
+        self.task_success_reward_factor = kwargs.get("task_success_reward_factor", 1.0)
         self.time_penalty = kwargs.get("time_penalty", 0.0)
 
         # capabilities
@@ -166,13 +171,18 @@ class Scenario(BaseScenario):
 
         # spawn goal at origin
         goal = self.world.landmarks[0]
-        goal.state.pos = torch.zeros(goal.state.pos.shape, device=self.world.device)
+        
+        
+        if env_index is not None:
+            goal.state.pos[env_index] = torch.zeros(goal.state.pos.shape, device=self.world.device)[env_index]
+            goal.state.rot[env_index] = torch.tanh(torch.randn_like(goal.state.rot[env_index], device=self.world.device)) * np.pi
+        elif env_index is None:
+            goal.state.pos = torch.zeros(goal.state.pos.shape, device=self.world.device)
+            goal.state.rot = torch.tanh(torch.randn_like(goal.state.rot, device=self.world.device)) * np.pi
+        
         goal_occupied_pos = torch.stack(
             [goal.state.pos], dim=1
         )
-        goal.state.rot = torch.tanh(torch.randn_like(goal.state.rot, device=self.world.device)) * np.pi
-        if env_index is not None:
-            goal_occupied_pos = goal_occupied_pos[env_index].unsqueeze(0)
 
         # then spawn packages randomly around it
         ScenarioUtils.spawn_entities_randomly(
@@ -248,7 +258,7 @@ class Scenario(BaseScenario):
                 
                 package.state.rot[env_index] = torch.tanh(torch.randn_like(package.state.rot, device=self.world.device))[env_index] * np.pi
                 angle_error, package.on_orientation = orientation_error(package.state.rot, package.goal.state.rot)
-                package.global_shaping_dist_to_orientation = angle_error[env_index] * self.package_orientation_reward_factor
+                package.global_shaping_dist_to_orientation[env_index] = angle_error[env_index] * self.package_orientation_reward_factor
 
             package.on_goal = self.world.is_overlapping(package, package.goal)
             
@@ -273,6 +283,9 @@ class Scenario(BaseScenario):
                 package.color = torch.tensor(
                     Color.RED.value, device=self.world.device, dtype=torch.float32
                 ).repeat(self.world.batch_dim, 1)
+
+                angle_error, package.on_orientation = orientation_error(package.state.rot, package.goal.state.rot)
+                package.dist_to_orientation = angle_error
                 
                 # package.color[package.on_goal] = torch.tensor(
                 #     Color.GREEN.value, device=self.world.device, dtype=torch.float32
@@ -288,17 +301,19 @@ class Scenario(BaseScenario):
                         )
                     
                     # orientation error
-                    angle_error, package.on_orientation = orientation_error(package.state.rot, package.goal.state.rot)
-                    angle_shaping = angle_error * self.package_orientation_reward_factor
-                    self.rew += (
-                        package.global_shaping_dist_to_orientation
-                        - angle_shaping
+                   
+                    angle_shaping = package.dist_to_orientation * self.package_orientation_reward_factor
+                    self.rew[package.on_goal] += (
+                        package.global_shaping_dist_to_orientation[package.on_goal]
+                        - angle_shaping[package.on_goal]
                     )
                     package.global_shaping_dist_to_goal = package_dist_shaping
                     package.global_shaping_dist_to_orientation = angle_shaping
                 
                 # positive reward when the agent achieves the goal
                 self.rew[package.on_goal] += 1.0 * self.package_on_goal_reward_factor
+                self.rew[package.on_orientation] += 1.0 * self.package_on_orientation_reward_factor
+                self.rew[torch.logical_and(package.on_goal, package.on_orientation)] += 1.0 * self.task_success_reward_factor
                 
             _time_penalty += self.time_penalty
             # penalty (negative rew) for agent-agent collisions
@@ -323,8 +338,8 @@ class Scenario(BaseScenario):
             for i, package in enumerate(self.packages):
                 # distance to goal and if agent is touching the box
                 dist_to_pkg = torch.linalg.vector_norm(agent.state.pos - package.state.pos, dim=-1)
-                agent_touching_package=self.world.is_overlapping(package, agent)
-                self.rew += (-dist_to_pkg * self.agent_package_dist_reward_factor) + self.agent_touching_package_reward_factor * agent_touching_package
+                # agent_touching_package=self.world.is_overlapping(package, agent)
+                self.rew += (-dist_to_pkg * self.agent_package_dist_reward_factor) # + self.agent_touching_package_reward_factor * agent_touching_package
                 
                 
 
@@ -599,19 +614,47 @@ class Scenario(BaseScenario):
     
     def extra_render(self, env_index: int = 0) -> "List[Geom]":
         from vmas.simulator import rendering
-
+        package = self.packages[0]
         geoms: List[Geom] = []
-        if not self.partial_observations:
-            return geoms
+        # if not self.partial_observations:
+        #     return geoms
 
-        for i, agent in enumerate(self.world.agents):
+        # for i, agent in enumerate(self.world.agents):
 
-            obs_circle = rendering.make_circle(self.package_observation_radius, filled=True)
+        #     obs_circle = rendering.make_circle(self.package_observation_radius, filled=True)
+        #     xform = rendering.Transform()
+        #     xform.set_translation(*agent.state.pos[env_index])
+        #     obs_circle.add_attr(xform)
+        #     obs_circle.set_color(*(0.827, 0.827, 0.827, 0.65))
+        #     geoms.append(obs_circle)
+
+        # box_marker, goal_marker = rendering.make_circle(0.05, filled=True), rendering.make_circle(0.05, filled=True)
+        # xform = rendering.Transform()
+        box_rot = package.state.rot[env_index].cpu()
+        box_pos = package.state.pos[env_index].cpu()
+        box_rel_corner = torch.tensor([self.package_width/2.0, self.package_length/2.0]).cpu()
+        rotation_matrix = torch.tensor([
+            [torch.cos(box_rot), -torch.sin(box_rot)],
+            [torch.sin(box_rot), torch.cos(box_rot)]
+        ]).cpu()
+        box_corner_pos = torch.matmul(rotation_matrix, box_rel_corner) + box_pos
+
+        goal_rot = package.goal.state.rot[env_index].cpu()
+        goal_pos = package.goal.state.pos[env_index].cpu()
+        goal_rel_corner = torch.tensor([self.package_width/2.0 + 0.1, self.package_length/2.0 + 0.1]).cpu()
+        rotation_matrix = torch.tensor([
+            [torch.cos(goal_rot), -torch.sin(goal_rot)],
+            [torch.sin(goal_rot), torch.cos(goal_rot)]
+        ]).cpu()
+        goal_corner_pos = torch.matmul(rotation_matrix, goal_rel_corner) + goal_pos
+
+        for pos_to_plot in [box_corner_pos, goal_corner_pos]:
+            marker = rendering.make_circle(0.05, filled=True)
             xform = rendering.Transform()
-            xform.set_translation(*agent.state.pos[env_index])
-            obs_circle.add_attr(xform)
-            obs_circle.set_color(*(0.827, 0.827, 0.827, 0.65))
-            geoms.append(obs_circle)
+            xform.set_translation(*pos_to_plot)
+            marker.add_attr(xform)
+            marker.set_color(0,0,0)
+            geoms.append(marker)
        
         return geoms
 
