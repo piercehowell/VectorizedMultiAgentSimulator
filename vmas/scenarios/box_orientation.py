@@ -215,7 +215,7 @@ class Scenario(BaseScenario):
             self.world.agents,
             self.world,
             env_index,
-            min_dist_between_entities=self.packages[0].shape.circumscribed_radius() + goal.shape.circumscribed_radius() + 0.01,
+            min_dist_between_entities=self.packages[0].shape.circumscribed_radius(),
             x_bounds=(
                 -self.world_semidim,
                 self.world_semidim,
