@@ -191,7 +191,7 @@ class Scenario(BaseScenario):
             self.world,
             env_index,
             min_dist_between_entities=max(
-                package.shape.circumscribed_radius() + goal.shape.circumscribed_radius() + 0.01
+                package.shape.circumscribed_radius() #+ goal.shape.circumscribed_radius() + 0.01
                 for package in self.packages
             ),
             x_bounds=(
@@ -305,16 +305,20 @@ class Scenario(BaseScenario):
                     # orientation error
                    
                     angle_shaping = package.dist_to_orientation * self.package_orientation_reward_factor
-                    self.rew[package.on_goal] += (
-                        package.global_shaping_dist_to_orientation[package.on_goal]
-                        - angle_shaping[package.on_goal]
+                    # self.rew[package.on_goal] += (
+                    #     package.global_shaping_dist_to_orientation[package.on_goal]
+                    #     - angle_shaping[package.on_goal]
+                    # )
+                    self.rew += (
+                        package.global_shaping_dist_to_orientation
+                        - angle_shaping
                     )
                     package.global_shaping_dist_to_goal = package_dist_shaping
                     package.global_shaping_dist_to_orientation = angle_shaping
                 
                 # positive reward when the agent achieves the goal
-                self.rew[package.on_goal] += 1.0 * self.package_on_goal_reward_factor
-                self.rew[torch.logical_and(package.on_orientation, package.on_goal)] += 1.0 * self.package_on_orientation_reward_factor
+                # self.rew[package.on_goal] += 1.0 * self.package_on_goal_reward_factor
+                # self.rew[torch.logical_and(package.on_orientation, package.on_goal)] += 1.0 * self.package_on_orientation_reward_factor
                 self.rew[torch.logical_and(package.on_goal, package.on_orientation)] += 1.0 * self.task_success_reward_factor
                 
             _time_penalty += self.time_penalty
