@@ -20,7 +20,7 @@ import typing
 if typing.TYPE_CHECKING:
     from vmas.simulator.rendering import Geom
 
-def orientation_error(a: torch.Tensor, b: torch.Tensor, eps=0.174533):
+def orientation_error(a: torch.Tensor, b: torch.Tensor, eps=0.349066):
     """calculate the angular error element wise between tensors.
     Expect the input angles to be in range [-pi, pi]"""
     angle_diff = b - a
