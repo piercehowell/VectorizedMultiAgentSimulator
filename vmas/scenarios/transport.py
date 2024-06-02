@@ -377,7 +377,7 @@ class Scenario(BaseScenario):
         return {"dist_to_goal": dist_to_goal, "dist_to_pkg": dist_to_pkg, "success_rate": success_rate,
                 "curiosity_state": self.curiosity_state(agent),
                 "agent_collision_rew": agent.agent_collision_rew,
-                "environment_state": self.environment_state(agent),
+                "environment_state": self.environment_state(agent)}
 
     def get_capability_repr(self, agent: Agent):
         """
