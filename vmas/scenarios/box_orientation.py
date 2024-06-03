@@ -249,7 +249,7 @@ class Scenario(BaseScenario):
                 
                 package.state.rot = torch.tanh(torch.randn_like(package.state.rot, device=self.world.device)) * np.pi
                 angle_error, package.on_orientation = orientation_error(package.state.rot, package.goal.state.rot)
-                package.global_shaping_dist_to_orientation = angle_error * self.package_orientation_reward_factor
+                package.global_shaping_dist_to_orientation = torch.abs(angle_error * self.package_orientation_reward_factor)
                 
             else:
                 package.global_shaping_dist_to_goal[env_index] = (
@@ -299,9 +299,14 @@ class Scenario(BaseScenario):
                 if self.add_dense_reward:
                     package_dist_shaping = package.dist_to_goal * self.package_goal_dist_reward_factor
                     
-                    self.rew[~package.on_goal] += (
-                        package.global_shaping_dist_to_goal[~package.on_goal]
-                        - package_dist_shaping[~package.on_goal]
+                    # self.rew[~package.on_goal] += (
+                    #     package.global_shaping_dist_to_goal[~package.on_goal]
+                    #     - package_dist_shaping[~package.on_goal]
+                    #     )
+
+                    self.rew += (
+                        package.global_shaping_dist_to_goal
+                        - package_dist_shaping
                         )
                     
                     # orientation error
@@ -377,7 +382,7 @@ class Scenario(BaseScenario):
 
         success_rate = torch.sum(
             torch.stack(
-                [package.on_goal for package in self.packages],
+                [torch.logical_and(package.on_goal, package.on_orientation) for package in self.packages],
                 dim=1,
             ),
             dim=-1
