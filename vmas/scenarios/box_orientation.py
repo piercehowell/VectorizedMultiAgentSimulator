@@ -20,7 +20,7 @@ import typing
 if typing.TYPE_CHECKING:
     from vmas.simulator.rendering import Geom
 
-def orientation_error(a: torch.Tensor, b: torch.Tensor, eps=0.349066):
+def orientation_error(a: torch.Tensor, b: torch.Tensor, eps=0.174533):
     """calculate the angular error element wise between tensors.
     Expect the input angles to be in range [-pi, pi]"""
     angle_diff = b - a
@@ -105,7 +105,8 @@ class Scenario(BaseScenario):
         capabilities = [] # save capabilities for relative capabilities later
         for i in range(n_agents):
             max_linear_vel = self.default_agent_max_linear_vel * random.uniform(self.capability_mult_min, self.capability_mult_max)
-            max_angular_vel = self.default_agent_max_angular_vel * random.uniform(self.capability_mult_min, self.capability_mult_max)
+            # max_angular_vel = self.default_agent_max_angular_vel * random.uniform(self.capability_mult_min, self.capability_mult_max)
+            max_angular_vel = max_linear_vel
             radius = self.default_agent_radius * random.uniform(self.capability_mult_min, self.capability_mult_max)
             mass = self.default_agent_mass * random.uniform(self.capability_mult_min, self.capability_mult_max)
 
@@ -117,7 +118,7 @@ class Scenario(BaseScenario):
                 u_range=[1,1],
                 shape=Sphere(radius),
                 mass=mass,
-                dynamics=DiffDrive(world, integration="rk4"),
+                # dynamics=DiffDrive(world, integration="rk4"),
                 render_action=True,
             )
             agent.agent_collision_rew = torch.zeros(batch_dim, device=device)
@@ -157,7 +158,8 @@ class Scenario(BaseScenario):
             capabilities = [] # save capabilities for relative capabilities later
             for agent in self.world.agents:
                 max_linear_vel = self.default_agent_max_linear_vel * random.uniform(self.capability_mult_min, self.capability_mult_max)
-                max_angular_vel = self.default_agent_max_angular_vel * random.uniform(self.capability_mult_min, self.capability_mult_max)
+                # max_angular_vel = self.default_agent_max_angular_vel * random.uniform(self.capability_mult_min, self.capability_mult_max)
+                max_angular_vel = max_linear_vel
                 radius = self.default_agent_radius * random.uniform(self.capability_mult_min, self.capability_mult_max)
                 mass = self.default_agent_mass * random.uniform(self.capability_mult_min, self.capability_mult_max)
 
@@ -259,7 +261,7 @@ class Scenario(BaseScenario):
                 
                 package.state.rot[env_index] = torch.tanh(torch.randn_like(package.state.rot, device=self.world.device))[env_index] * np.pi
                 angle_error, package.on_orientation = orientation_error(package.state.rot, package.goal.state.rot)
-                package.global_shaping_dist_to_orientation[env_index] = angle_error[env_index] * self.package_orientation_reward_factor
+                package.global_shaping_dist_to_orientation[env_index] = torch.abs(angle_error[env_index] * self.package_orientation_reward_factor)
 
             # package.on_goal = self.world.is_overlapping(package, package.goal)
             package.on_goal = package.dist_to_goal < self.package_on_goal_threshold
@@ -304,7 +306,7 @@ class Scenario(BaseScenario):
                     
                     # orientation error
                    
-                    angle_shaping = package.dist_to_orientation * self.package_orientation_reward_factor
+                    angle_shaping = torch.abs(package.dist_to_orientation * self.package_orientation_reward_factor)
                     # self.rew[package.on_goal] += (
                     #     package.global_shaping_dist_to_orientation[package.on_goal]
                     #     - angle_shaping[package.on_goal]
@@ -318,7 +320,7 @@ class Scenario(BaseScenario):
                 
                 # positive reward when the agent achieves the goal
                 self.rew[package.on_goal] += 1.0 * self.package_on_goal_reward_factor
-                # self.rew[torch.logical_and(package.on_orientation, package.on_goal)] += 1.0 * self.package_on_orientation_reward_factor
+                self.rew[package.on_orientation] += 1.0 * self.package_on_orientation_reward_factor
                 self.rew[torch.logical_and(package.on_goal, package.on_orientation)] += 1.0 * self.task_success_reward_factor
                 
             _time_penalty += self.time_penalty
