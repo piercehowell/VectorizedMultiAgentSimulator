@@ -20,7 +20,7 @@ import typing
 if typing.TYPE_CHECKING:
     from vmas.simulator.rendering import Geom
 
-def orientation_error(a: torch.Tensor, b: torch.Tensor, eps=0.174533):
+def orientation_error(a: torch.Tensor, b: torch.Tensor, eps=0.349066):
     """calculate the angular error element wise between tensors.
     Expect the input angles to be in range [-pi, pi]"""
     angle_diff = b - a
@@ -345,7 +345,7 @@ class Scenario(BaseScenario):
         if self.add_dense_reward:
             for i, package in enumerate(self.packages):
                 # distance to goal and if agent is touching the box
-                dist_to_pkg = torch.linalg.vector_norm(agent.state.pos - package.state.pos, dim=-1)- agent.shape.radius - package.shape.circumscribed_radius()
+                dist_to_pkg = torch.linalg.vector_norm(agent.state.pos - package.state.pos, dim=-1) #- agent.shape.radius - package.shape.circumscribed_radius()
                 # agent_touching_package=self.world.is_overlapping(package, agent)
                 self.rew += (-dist_to_pkg * self.agent_package_dist_reward_factor) # + self.agent_touching_package_reward_factor * agent_touching_package
                 
@@ -517,6 +517,23 @@ class Scenario(BaseScenario):
             package_obs.append(package.goal.state.pos)
             package_obs.append(package.goal.state.rot)
 
+        # get the closest agent to the current agent, and append that agents state.
+        min_dist = torch.zeros(agent.state.pos.shape[0], device=self.world.device) + 1e6
+        # agent_state_to_append = torch.zeros(*agent.state.pos.shape)
+        closest_agent_state = [agent.state.pos.clone(), agent.state.rot.clone(), agent.state.vel.clone(), agent.state.ang_vel.clone()]
+        for i, a in enumerate(self.world.agents):
+            if a == agent:
+                continue
+            agent_agent_distance = torch.linalg.vector_norm(agent.state.pos - a.state.pos, dim=-1)
+            b = agent_agent_distance < min_dist
+            min_dist[b] = agent_agent_distance[b]
+            # closest_agent_state[b] = a.state.pos[b]
+            closest_agent_state[0][b] = torch.clone(a.state.pos)[b]
+            closest_agent_state[1][b] = torch.clone(a.state.rot)[b]
+            closest_agent_state[2][b] = torch.clone(a.state.vel)[b]
+            closest_agent_state[3][b] = torch.clone(a.state.ang_vel)[b]
+        
+
         capability_repr = self.get_capability_repr(agent)
         return torch.cat(
             [
@@ -525,6 +542,7 @@ class Scenario(BaseScenario):
                 agent.state.vel,
                 agent.state.ang_vel,
                 *package_obs,
+                *closest_agent_state,
             ] + capability_repr,
             dim=-1,
         )
