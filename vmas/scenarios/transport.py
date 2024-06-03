@@ -40,6 +40,8 @@ class Scenario(BaseScenario):
         self.package_length = kwargs.get("package_length", 0.4)
         self.package_rotatable = kwargs.get("package_rotatable", True)
         self.package_mass = kwargs.get("package_mass", 3)
+        # how far away the packages can spawn from the goal
+        self.min_pkg_goal_spawn_dist = kwargs.get("min_pkg_goal_spawn_dist", 0.01)
 
         # partial obs
         self.partial_observations = kwargs.get("partial_observations", False)
@@ -169,7 +171,7 @@ class Scenario(BaseScenario):
             self.world,
             env_index,
             min_dist_between_entities=max(
-                package.shape.circumscribed_radius() + goal.shape.radius + 0.01
+                package.shape.circumscribed_radius() + goal.shape.radius + self.min_pkg_goal_spawn_dist
                 for package in self.packages
             ),
             x_bounds=(
