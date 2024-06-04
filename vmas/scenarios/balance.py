@@ -306,8 +306,8 @@ class Scenario(BaseScenario):
                     -self.world.y_semidim
                     - self.floor.shape.width / 2
                     - (
-                        self.default_agent_radius * self.capability_mult_max * 2 if not self.multiple_ranges else \
-                        self.default_agent_radius * self.capability_mult_range[-1][1] * 2
+                        self.default_agent_radius * self.capability_mult_max if not self.multiple_ranges else \
+                        self.default_agent_radius * self.capability_mult_range[-1][1]
                     ),
                 ],
                 device=self.world.device,
