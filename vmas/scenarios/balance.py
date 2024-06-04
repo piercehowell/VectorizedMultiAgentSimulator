@@ -60,8 +60,10 @@ class Scenario(BaseScenario):
 
         # capabilities
         self.capability_mult_range = kwargs.get("capability_mult_range", [0.75, 1.25])
-        self.capability_mult_min = self.capability_mult_range[0]
-        self.capability_mult_max = self.capability_mult_range[1]
+        self.multiple_ranges = kwargs.get("multiple_ranges", False)
+        if not self.multiple_ranges:
+            self.capability_mult_min = self.capability_mult_range[0]
+            self.capability_mult_max = self.capability_mult_range[1]
         self.capability_representation = kwargs.get("capability_representation", "raw")
         self.default_u_multiplier = kwargs.get("default_u_multiplier", 0.7)
         self.default_agent_radius = kwargs.get("default_agent_radius", 0.03)
@@ -80,16 +82,29 @@ class Scenario(BaseScenario):
 
         self.line_length = 0.8
 
-        self.shaping_factor = 100
-        self.fall_reward = -10
+        self.shaping_factor = 1
+        self.fall_reward = -0.1
 
         # Make world
         world = World(batch_dim, device, gravity=(0.0, self.gravity), y_semidim=self.world_semidim)
         # Add agents
         capabilities = [] # save capabilities for relative capabilities later
         for i in range(self.n_agents):
+            if self.multiple_ranges:
+                cap_idx = int(random.choice(np.arange(len(self.capability_mult_range))))
+                self.capability_mult_min = self.capability_mult_range[cap_idx][0]
+                self.capability_mult_max = self.capability_mult_range[cap_idx][1]
+                print("MADE IT HERE")
             max_u = self.default_u_multiplier * random.uniform(self.capability_mult_min, self.capability_mult_max)
+            if self.multiple_ranges:
+                cap_idx = int(random.choice(np.arange(len(self.capability_mult_range))))
+                self.capability_mult_min = self.capability_mult_range[cap_idx][0]
+                self.capability_mult_max = self.capability_mult_range[cap_idx][1]
             radius = self.default_agent_radius * random.uniform(self.capability_mult_min, self.capability_mult_max)
+            if self.multiple_ranges:
+                cap_idx = int(random.choice(np.arange(len(self.capability_mult_range))))
+                self.capability_mult_min = self.capability_mult_range[cap_idx][0]
+                self.capability_mult_max = self.capability_mult_range[cap_idx][1]
             mass = self.default_agent_mass * random.uniform(self.capability_mult_min, self.capability_mult_max)
 
             agent = Agent(
@@ -160,8 +175,20 @@ class Scenario(BaseScenario):
         if not env_index:        
             capabilities = [] # save capabilities for relative capabilities later
             for agent in self.world.agents:
+                if self.multiple_ranges:
+                    cap_idx = int(random.choice(np.arange(len(self.capability_mult_range))))
+                    self.capability_mult_min = self.capability_mult_range[cap_idx][0]
+                    self.capability_mult_max = self.capability_mult_range[cap_idx][1]
                 max_u = self.default_u_multiplier * random.uniform(self.capability_mult_min, self.capability_mult_max)
+                if self.multiple_ranges:
+                    cap_idx = int(random.choice(np.arange(len(self.capability_mult_range))))
+                    self.capability_mult_min = self.capability_mult_range[cap_idx][0]
+                    self.capability_mult_max = self.capability_mult_range[cap_idx][1]
                 radius = self.default_agent_radius * random.uniform(self.capability_mult_min, self.capability_mult_max)
+                if self.multiple_ranges:
+                    cap_idx = int(random.choice(np.arange(len(self.capability_mult_range))))
+                    self.capability_mult_min = self.capability_mult_range[cap_idx][0]
+                    self.capability_mult_max = self.capability_mult_range[cap_idx][1]
                 mass = self.default_agent_mass * random.uniform(self.capability_mult_min, self.capability_mult_max)
 
                 # capabilities.append([max_u, agent.shape.radius, agent.mass])
@@ -206,7 +233,8 @@ class Scenario(BaseScenario):
                 ),
                 torch.full(
                     (1, 1) if env_index is not None else (self.world.batch_dim, 1),
-                    -self.world.y_semidim + self.default_agent_radius * self.capability_mult_max * 2,
+                    -self.world.y_semidim + self.default_agent_radius * self.capability_mult_max * 2 if not self.multiple_ranges else \
+                    -self.world.y_semidim + self.default_agent_radius * self.capability_mult_range[-1][1] * 2,
                     device=self.world.device,
                     dtype=torch.float32,
                 ),
@@ -277,7 +305,10 @@ class Scenario(BaseScenario):
                     0,
                     -self.world.y_semidim
                     - self.floor.shape.width / 2
-                    - self.default_agent_radius * self.capability_mult_max,
+                    - (
+                        self.default_agent_radius * self.capability_mult_max * 2 if not self.multiple_ranges else \
+                        self.default_agent_radius * self.capability_mult_range[-1][1] * 2
+                    ),
                 ],
                 device=self.world.device,
             ),
