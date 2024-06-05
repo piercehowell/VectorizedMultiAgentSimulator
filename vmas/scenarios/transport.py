@@ -23,7 +23,7 @@ if typing.TYPE_CHECKING:
 
 class Scenario(BaseScenario):
     def make_world(self, batch_dim: int, device: torch.device, **kwargs):
-        n_agents = kwargs.get("n_agents", 2)
+        self.n_agents = kwargs.get("n_agents", 2)
 
         # general world settings
         self.world_semidim = kwargs.get("world_semidim", 1.0) # m
@@ -65,9 +65,11 @@ class Scenario(BaseScenario):
         self.time_penalty = kwargs.get("time_penalty", 0.0)
 
         # capabilities
-        self.capability_mult_range = kwargs.get("capability_mult_range", [0.5, 2])
-        self.capability_mult_min = self.capability_mult_range[0]
-        self.capability_mult_max = self.capability_mult_range[1]
+        self.iter_ct = 0
+        self.agent_0_failed = False
+        # self.capability_mult_range = kwargs.get("capability_mult_range", [0.5, 2])
+        # self.capability_mult_min = self.capability_mult_range[0]
+        # self.capability_mult_max = self.capability_mult_range[1]
         self.capability_representation = kwargs.get("capability_representation", "raw")
 
         # Make world
@@ -86,12 +88,19 @@ class Scenario(BaseScenario):
         )
 
         # Add agents
+        print("make world called")
         capabilities = [] # save capabilities for relative capabilities later
-        for i in range(n_agents):
-            max_linear_vel = self.default_agent_max_linear_vel * random.uniform(self.capability_mult_min, self.capability_mult_max)
-            max_angular_vel = self.default_agent_max_angular_vel * random.uniform(self.capability_mult_min, self.capability_mult_max)
-            radius = self.default_agent_radius * random.uniform(self.capability_mult_min, self.capability_mult_max)
-            mass = self.default_agent_mass * random.uniform(self.capability_mult_min, self.capability_mult_max)
+        for i in range(self.n_agents):
+            if i == 0:
+                max_linear_vel = self.default_agent_max_linear_vel * 1.0
+                max_angular_vel = self.default_agent_max_angular_vel * 1.0
+                radius = self.default_agent_radius * 1.0
+                mass = self.default_agent_mass * 1.0
+            else:
+                max_linear_vel = self.default_agent_max_linear_vel * 1.0
+                max_angular_vel = self.default_agent_max_angular_vel * 1.0
+                radius = self.default_agent_radius * 1.0
+                mass = self.default_agent_mass * 1.0
 
             capabilities.append([max_linear_vel, max_angular_vel, radius, mass])
 
@@ -139,11 +148,26 @@ class Scenario(BaseScenario):
         # only do this during batched resets!
         if not env_index:        
             capabilities = [] # save capabilities for relative capabilities later
-            for agent in self.world.agents:
-                max_linear_vel = self.default_agent_max_linear_vel * random.uniform(self.capability_mult_min, self.capability_mult_max)
-                max_angular_vel = self.default_agent_max_angular_vel * random.uniform(self.capability_mult_min, self.capability_mult_max)
-                radius = self.default_agent_radius * random.uniform(self.capability_mult_min, self.capability_mult_max)
-                mass = self.default_agent_mass * random.uniform(self.capability_mult_min, self.capability_mult_max)
+            for i in range(self.n_agents):
+                agent = self.world.agents[i]
+
+                if i == 0:
+                    if self.agent_0_failed:
+                        max_linear_vel = self.default_agent_max_linear_vel * 0.0
+                        max_angular_vel = self.default_agent_max_angular_vel * 0.0
+                        radius = self.default_agent_radius * 1.0
+                        mass = self.default_agent_mass * 1.0
+                        agent.color = (1.0, 0.0, 0.0)
+                    else:
+                        max_linear_vel = self.default_agent_max_linear_vel * 1.0
+                        max_angular_vel = self.default_agent_max_angular_vel * 1.0
+                        radius = self.default_agent_radius * 1.0
+                        mass = self.default_agent_mass * 1.0
+                else:
+                    max_linear_vel = self.default_agent_max_linear_vel * 1.0
+                    max_angular_vel = self.default_agent_max_angular_vel * 1.0
+                    radius = self.default_agent_radius * 1.0
+                    mass = self.default_agent_mass * 1.0
 
                 capabilities.append([max_linear_vel, max_angular_vel, radius, mass])
 
@@ -168,7 +192,7 @@ class Scenario(BaseScenario):
             self.world,
             env_index,
             min_dist_between_entities=max(
-                package.shape.circumscribed_radius() + goal.shape.radius + 0.01
+                package.shape.circumscribed_radius() + goal.shape.radius + 1.0
                 for package in self.packages
             ),
             x_bounds=(
@@ -282,6 +306,37 @@ class Scenario(BaseScenario):
                         b.agent_collision_rew[
                             distance <= self.min_collision_distance
                         ] += self.interagent_collision_penalty
+
+            agent_0 = self.world.agents[0]
+            agent_1 = self.world.agents[1]
+            env_0_dist_to_pkg = torch.linalg.vector_norm(agent_0.state.pos - package.state.pos, dim=-1)[0]
+            print("dist to pkg", env_0_dist_to_pkg)
+            if env_0_dist_to_pkg < 1.2:
+                self.agent_0_failed = True
+
+                capabilities = [] # save capabilities for relative capabilities later
+                for i in range(self.n_agents):
+                    agent = self.world.agents[i]
+
+                    if i == 0:
+                        max_linear_vel = self.default_agent_max_linear_vel * 0.0
+                        max_angular_vel = self.default_agent_max_angular_vel * 0.0
+                        radius = self.default_agent_radius * 1.0
+                        mass = self.default_agent_mass * 1.0
+                        agent.color = (1.0, 0.0, 0.0)
+                    else:
+                        max_linear_vel = self.default_agent_max_linear_vel * 1.0
+                        max_angular_vel = self.default_agent_max_angular_vel * 1.0
+                        radius = self.default_agent_radius * 1.0
+                        mass = self.default_agent_mass * 1.0
+
+                    capabilities.append([max_linear_vel, max_angular_vel, radius, mass])
+
+                    agent.u_multiplier=[max_linear_vel, max_angular_vel]
+                    agent.shape=Sphere(radius)
+                    agent.mass=mass
+
+                self.capabilities = torch.tensor(capabilities)
 
         # reward for how close agents are to all packages
         if self.add_dense_reward:
@@ -460,6 +515,7 @@ class Scenario(BaseScenario):
         )
     
     def observation(self, agent: Agent):
+        self.iter_ct += 1
         if self.partial_observations:
             return self.partial_observation(agent)
         else:
